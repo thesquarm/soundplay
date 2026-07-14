@@ -6,6 +6,8 @@ interface RecorderProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   audioDestination: MediaStreamAudioDestinationNode | null;
   className?: string;
+  onRecordingChange?: (recording: boolean, type?: 'video-audio' | 'audio-only') => void;
+  recordingStateRef?: React.MutableRefObject<{ isRecording: boolean; stop: () => void; start: () => void } | null>;
 }
 
 // CD-quality WAV PCM 16-bit Stereo Encoder
@@ -62,7 +64,13 @@ function bufferToWav(channels: Float32Array[], sampleRate: number): Blob {
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
-export default function Recorder({ canvasRef, audioDestination, className = '' }: RecorderProps) {
+export default function Recorder({ 
+  canvasRef, 
+  audioDestination, 
+  className = '',
+  onRecordingChange,
+  recordingStateRef
+}: RecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordType, setRecordType] = useState<'video-audio' | 'audio-only'>('video-audio');
   const [seconds, setSeconds] = useState(0);
@@ -76,6 +84,22 @@ export default function Recorder({ canvasRef, audioDestination, className = '' }
   const leftChannelRef = useRef<Float32Array[]>([]);
   const rightChannelRef = useRef<Float32Array[]>([]);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
+
+  // Sync state up to parent
+  useEffect(() => {
+    onRecordingChange?.(isRecording, recordType);
+  }, [isRecording, recordType, onRecordingChange]);
+
+  // Expose start/stop functions to parent ref on every render
+  useEffect(() => {
+    if (recordingStateRef) {
+      recordingStateRef.current = {
+        isRecording,
+        stop: stopRecording,
+        start: startRecording
+      };
+    }
+  });
 
   // Stop recording timer when unmounted
   useEffect(() => {

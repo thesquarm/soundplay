@@ -47,8 +47,10 @@ class AudioEngine {
   }
 
   public resume() {
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended' || (this.ctx as any).state === 'interrupted') {
+        this.ctx.resume().catch((err) => console.error("Failed to resume AudioContext:", err));
+      }
     }
   }
 

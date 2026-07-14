@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { audioService } from './audioEngine';
 import { SoundSource, CameraState, SoundType } from './types';
-import { loadSounds, saveSound, deleteSoundFromDB, updateSoundMetadata } from './lib/db';
+import { loadSounds, saveSound, deleteSoundFromDB, updateSoundMetadata, clearAllSoundsFromDB } from './lib/db';
 import SoundList from './components/SoundList';
 import Recorder from './components/Recorder';
 import Joystick from './components/Joystick';
@@ -88,12 +88,9 @@ export default function App() {
   const [showCookieBanner, setShowCookieBanner] = useState(false);
   const [showMoveHint, setShowMoveHint] = useState(false);
 
-  useEffect(() => {
-    if (window.innerWidth >= 1024) {
-      setShowSoundList(true);
-      setShowRecorder(true);
-    }
-  }, []);
+  // Live Performance Recorder State integration
+  const [isRecordingPerformance, setIsRecordingPerformance] = useState(false);
+  const recorderRef = useRef<{ isRecording: boolean; stop: () => void; start: () => void } | null>(null);
 
   useEffect(() => {
     const accepted = localStorage.getItem('soundplay_cookies_accepted');
@@ -309,6 +306,15 @@ export default function App() {
     }
   };
 
+  const handleDeleteAllSounds = () => {
+    sounds.forEach((sound) => {
+      audioService.stopSound(sound.id);
+    });
+    setSounds([]);
+    setSelectedSoundId(null);
+    clearAllSoundsFromDB();
+  };
+
   const startMicRecording = async () => {
     setMicError(null);
     micChunksRef.current = [];
@@ -462,6 +468,7 @@ export default function App() {
   // Keyboard binding updates
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      audioService.resume();
       const key = e.key.toLowerCase();
       pressedKeysRef.current[key] = true;
     };
@@ -481,6 +488,7 @@ export default function App() {
 
   // Mouse / Trackpad Drag Orbiting
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    audioService.resume();
     isDraggingRef.current = true;
     lastMousePosRef.current = { x: e.clientX, y: e.clientY };
   };
@@ -516,6 +524,7 @@ export default function App() {
 
   // Touch drag orbiting for mobile screens
   const handleCanvasTouchStart = (e: React.TouchEvent) => {
+    audioService.resume();
     if (e.touches.length > 0) {
       isDraggingRef.current = true;
       lastMousePosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -528,6 +537,7 @@ export default function App() {
   };
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    audioService.resume();
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -1436,21 +1446,36 @@ export default function App() {
           <button
             id="toggle-recorder-btn"
             onClick={() => {
-              setShowRecorder(!showRecorder);
-              // Minimize sources list on mobile view if opening recorder
-              if (window.innerWidth < 768 && !showRecorder) {
-                setShowSoundList(false);
+              if (isRecordingPerformance) {
+                recorderRef.current?.stop();
+              } else {
+                setShowRecorder(!showRecorder);
+                // Minimize sources list on mobile view if opening recorder
+                if (window.innerWidth < 768 && !showRecorder) {
+                  setShowSoundList(false);
+                }
               }
             }}
             className={`p-2 rounded-lg border transition-all duration-150 cursor-pointer shadow-sm flex items-center gap-1.5 ${
-              showRecorder 
-                ? 'bg-red-950/90 text-red-400 border-red-800 font-bold scale-[1.02]' 
-                : 'bg-zinc-900/90 hover:bg-zinc-800 border-zinc-800 text-zinc-200'
+              isRecordingPerformance 
+                ? 'bg-red-600 text-white border-red-500 font-bold scale-[1.02] animate-pulse shadow-red-500/30 shadow-lg' 
+                : showRecorder 
+                  ? 'bg-red-950/90 text-red-400 border-red-800 font-bold scale-[1.02]' 
+                  : 'bg-zinc-900/90 hover:bg-zinc-800 border-zinc-800 text-zinc-200'
             }`}
-            title="Toggle Performance Recorder"
+            title={isRecordingPerformance ? "Recording active! Click to Stop and Export" : "Toggle Performance Recorder"}
           >
-            <Radio className="w-4 h-4" />
-            <span className="text-[9px] font-mono font-extrabold hidden md:inline">RECORDER</span>
+            {isRecordingPerformance ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-white animate-ping shrink-0" />
+                <span className="text-[9px] font-mono font-extrabold">STOP REC</span>
+              </>
+            ) : (
+              <>
+                <Radio className="w-4 h-4" />
+                <span className="text-[9px] font-mono font-extrabold hidden md:inline">RECORDER</span>
+              </>
+            )}
           </button>
 
           {/* Global Mute */}
@@ -1538,6 +1563,7 @@ export default function App() {
       <div className="absolute bottom-6 left-6 z-10 block pointer-events-auto">
         <Joystick 
           onMove={(vector) => {
+            audioService.resume();
             joystickVectorRef.current = vector;
           }} 
         />
@@ -1634,28 +1660,34 @@ export default function App() {
       )}
 
       {/* 5. PERFORMANCE RECORDER FLOATING CONTROL */}
-      {showRecorder && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-6 z-20 max-w-sm w-[92vw] sm:w-85 bg-white border border-zinc-350 shadow-2xl rounded-2xl p-4 pointer-events-auto animate-slide-up">
-          <div className="flex items-center justify-between mb-2 border-b border-zinc-100 pb-2">
-            <h3 className="text-xs font-extrabold text-zinc-900 font-mono uppercase tracking-wider flex items-center gap-1.5">
-              <Radio className="w-4 h-4 text-red-500 animate-pulse" />
-              Performance Recorder
-            </h3>
-            <button
-              id="close-recorder-btn"
-              onClick={() => setShowRecorder(false)}
-              className="text-zinc-400 hover:text-zinc-950 p-1.5 rounded-lg hover:bg-zinc-100 font-bold font-mono text-xs cursor-pointer"
-              title="Close Panel"
-            >
-              ✕
-            </button>
-          </div>
-          <Recorder 
-            canvasRef={canvasRef} 
-            audioDestination={audioService.recorderDestination} 
-          />
+      <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-6 z-20 max-w-sm w-[92vw] sm:w-85 bg-white border border-zinc-350 shadow-2xl rounded-2xl p-4 pointer-events-auto animate-slide-up ${showRecorder ? 'block' : 'hidden'}`}>
+        <div className="flex items-center justify-between mb-2 border-b border-zinc-100 pb-2">
+          <h3 className="text-xs font-extrabold text-zinc-900 font-mono uppercase tracking-wider flex items-center gap-1.5">
+            <Radio className="w-4 h-4 text-red-500 animate-pulse" />
+            Performance Recorder
+          </h3>
+          <button
+            id="close-recorder-btn"
+            onClick={() => setShowRecorder(false)}
+            className="text-zinc-400 hover:text-zinc-950 p-1.5 rounded-lg hover:bg-zinc-100 font-bold font-mono text-xs cursor-pointer"
+            title="Close Panel"
+          >
+            ✕
+          </button>
         </div>
-      )}
+        <Recorder 
+          canvasRef={canvasRef} 
+          audioDestination={audioService.recorderDestination} 
+          onRecordingChange={(recording) => {
+            setIsRecordingPerformance(recording);
+            if (recording) {
+              // Close the pop up window immediately when active
+              setShowRecorder(false);
+            }
+          }}
+          recordingStateRef={recorderRef}
+        />
+      </div>
 
       {/* 6. SIDEBAR CONTROLS DASHBOARD PANEL (SLIDING OVERLAY) */}
       {showSoundList && (
@@ -1665,6 +1697,7 @@ export default function App() {
             listenerPos={{ x: camera.x, z: camera.z }}
             onUpdateSound={handleUpdateSound}
             onDeleteSound={handleDeleteSound}
+            onDeleteAllSounds={handleDeleteAllSounds}
             onAddSound={handleAddSound}
             onTeleportTo={handleTeleportTo}
             onClose={() => setShowSoundList(false)}
@@ -1675,7 +1708,7 @@ export default function App() {
       {/* 7. HELP MODAL POPUP (MANUAL RESET OVERLAY) */}
       {showHelp && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 pointer-events-auto">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative border border-zinc-950">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative border border-zinc-950 max-h-[90vh] overflow-y-auto">
             <button
               id="help-close-cross"
               onClick={() => setShowHelp(false)}
@@ -1696,19 +1729,26 @@ export default function App() {
                 Welcome to <strong className="text-zinc-900 font-semibold">sound_play</strong>, a minimalist sketches visual canvas containing fully 3D spatialized stereo sounds.
               </p>
               
-              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-1.5 font-mono text-[11px]">
-                <div className="font-bold text-zinc-900">KEYBOARD traversal (FPS style):</div>
-                <div>• <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">W</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">S</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">↑</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">↓</kbd> : Forward / Backward</div>
+              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-1.5 font-mono text-[10px]">
+                <div className="font-extrabold text-zinc-900 text-[11px]">NAVIGATION CONTROLS:</div>
+                <div>• <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">W</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">S</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">↑</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">↓</kbd> : Move Forward / Backward</div>
                 <div>• <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">A</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">D</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">←</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">→</kbd> : Strafe Left / Right</div>
-                <div>• <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">Q</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">E</kbd> : Turn Look Left / Right</div>
+                <div>• <strong>On Mobile/Tablets:</strong> Drag the touch joystick at the bottom-left of the screen.</div>
+              </div>
+
+              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-2.5">
+                <div className="font-extrabold text-zinc-900 text-[11px] font-mono">AVAILABLE SOUND OPTIONS:</div>
+                <div className="space-y-1.5 leading-snug">
+                  <div>• <strong className="text-zinc-800 font-mono">North (Grey)</strong>: Natural open-air bird song synthesizer representing organic forest heights.</div>
+                  <div>• <strong className="text-zinc-800 font-mono">East (Yellow)</strong>: High-fidelity micro-tonal bee buzzes reflecting rapid wing vibrations.</div>
+                  <div>• <strong className="text-zinc-800 font-mono">South (Red)</strong>: Soft falling rain showers backed by periodic resonant thunderclaps.</div>
+                  <div>• <strong className="text-zinc-800 font-mono">West (Green)</strong>: Steady constant mid-frequency soundwaves for calming auditory meditation.</div>
+                  <div>• <strong className="text-zinc-800 font-mono">Upload / Record</strong>: Add your own custom stereo files (.mp3, .wav) or record live microphone clips in real-time!</div>
+                </div>
               </div>
 
               <p>
-                <strong>Egoshooter Mouse Look:</strong> Click the 3D board to lock your cursor and look around smoothly by moving your mouse (Press <kbd className="px-1 py-0.5 border rounded bg-zinc-100 font-mono text-[10px]">ESC</kbd> to unlock). On tablets, simply touch and drag your finger across the board to steer.
-              </p>
-
-              <p>
-                Use the top HUD buttons to toggle the <strong>Soundscape Sources</strong> list and the <strong>Performance Recorder</strong>.
+                Use the top toolbar to direct upload or record live soundscapes, toggle the <strong>Sources Panel</strong> to adjust volume and rename sources, or start the <strong>Performance Recorder</strong> to download your explorations as premium video or audio files!
               </p>
             </div>
 
@@ -1722,6 +1762,11 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* FOOTER METADATA */}
+      <footer className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 pointer-events-none select-none text-[8.5px] font-sans text-center text-zinc-400/80 max-w-[92vw] leading-tight">
+        App by Philip and Google AI Studio / If you have any questions or feedback, please contact Philip, <a href="mailto:p.stade@mh-freiburg.de" className="pointer-events-auto hover:text-zinc-200 underline transition-colors">p.stade@mh-freiburg.de</a>
+      </footer>
 
       {/* 8. COOKIE CONSENT BANNER */}
       {showCookieBanner && (

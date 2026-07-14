@@ -8,6 +8,7 @@ interface SoundListProps {
   listenerPos: { x: number; z: number };
   onUpdateSound: (id: string, updates: Partial<SoundSource>) => void;
   onDeleteSound: (id: string) => void;
+  onDeleteAllSounds?: () => void;
   onAddSound: (type: SoundType, name: string, file?: File) => void;
   onTeleportTo: (x: number, z: number) => void;
   onClose?: () => void;
@@ -18,6 +19,7 @@ export default function SoundList({
   listenerPos,
   onUpdateSound,
   onDeleteSound,
+  onDeleteAllSounds,
   onAddSound,
   onTeleportTo,
   onClose,
@@ -169,7 +171,7 @@ export default function SoundList({
               ref={fileInputRef}
               id="audio-file-upload"
               type="file"
-              accept="audio/*"
+              accept="audio/*,video/*,.mp3,.wav,.m4a,.caf,.mp4,.aac,.ogg,.webm"
               onChange={handleFileUpload}
               className="hidden"
             />
@@ -216,6 +218,21 @@ export default function SoundList({
 
       {/* Dynamic List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {sounds.length > 0 && onDeleteAllSounds && (
+          <div className="flex justify-between items-center px-1 pb-1 border-b border-zinc-100 mb-2">
+            <span className="text-[9px] text-zinc-400 font-mono font-extrabold uppercase">
+              ACTIVE SOURCES ({sounds.length})
+            </span>
+            <button
+              id="clear-all-sounds-btn"
+              onClick={onDeleteAllSounds}
+              className="text-[9px] font-mono text-red-500 hover:text-red-700 hover:underline font-extrabold cursor-pointer"
+            >
+              DELETE ALL
+            </button>
+          </div>
+        )}
+
         {sounds.length === 0 ? (
           <div className="text-center py-8 rounded-lg bg-zinc-50/50">
             <p className="text-xs text-zinc-400">No active sounds in the world</p>
