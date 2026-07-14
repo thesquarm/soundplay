@@ -82,6 +82,8 @@ export default function App() {
   // Responsive floating panel states (hidden on mobile, visible on desktop by default)
   const [showSoundList, setShowSoundList] = useState(false);
   const [showRecorder, setShowRecorder] = useState(false);
+  const [showCookieBanner, setShowCookieBanner] = useState(false);
+  const [showMoveHint, setShowMoveHint] = useState(false);
 
   useEffect(() => {
     if (window.innerWidth >= 1024) {
@@ -89,6 +91,30 @@ export default function App() {
       setShowRecorder(true);
     }
   }, []);
+
+  useEffect(() => {
+    const accepted = localStorage.getItem('soundplay_cookies_accepted');
+    if (!accepted) {
+      const timer = setTimeout(() => {
+        setShowCookieBanner(true);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showMoveHint) {
+      const timer = setTimeout(() => {
+        setShowMoveHint(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [showMoveHint]);
+
+  const handleAcceptCookies = () => {
+    localStorage.setItem('soundplay_cookies_accepted', 'true');
+    setShowCookieBanner(false);
+  };
 
   // Dust particles ref
   const dustParticlesRef = useRef<{ x: number; y: number; z: number; speedY: number; size: number; phase: number }[]>([]);
@@ -188,6 +214,7 @@ export default function App() {
     audioService.init();
     audioService.resume();
     setIsStarted(true);
+    setShowMoveHint(true);
     
     try {
       // Decode any loaded IndexedDB buffers
@@ -572,11 +599,12 @@ export default function App() {
         skyGrad.addColorStop(0.7, '#DEC484');  // Calico
         skyGrad.addColorStop(1, '#E1A36F');    // Harvest Gold
       } else {
-        // Night Palette Sky (Midnight editions of the palette): Midnight Smalt Blue -> Midnight Sea Nymph -> Midnight Calico -> Midnight Harvest Gold
-        skyGrad.addColorStop(0, '#0a1215');    // Midnight Smalt Blue
-        skyGrad.addColorStop(0.35, '#0e1817');  // Midnight Sea Nymph
-        skyGrad.addColorStop(0.7, '#1a160d');   // Midnight Calico
-        skyGrad.addColorStop(1, '#211408');    // Midnight Harvest Gold
+        // Deep midnight sky extending almost all the way down, compressing twilight colors right at the horizon
+        skyGrad.addColorStop(0, '#040708');     // Pitch dark space
+        skyGrad.addColorStop(0.65, '#070b0d');   // Very deep Midnight Smalt Blue
+        skyGrad.addColorStop(0.82, '#0c1514');   // Deep Sea Nymph glow
+        skyGrad.addColorStop(0.92, '#181a14');   // Deep Calico glow
+        skyGrad.addColorStop(1, '#1e160e');      // Deep Harvest Gold glow at the horizon
       }
       ctx.fillStyle = skyGrad;
       ctx.fillRect(0, 0, width, Math.max(0, horizonY));
@@ -634,11 +662,11 @@ export default function App() {
         groundGrad.addColorStop(0.7, '#E2D8A5');  // Hampton
         groundGrad.addColorStop(1, '#577E89');    // Smalt Blue
       } else {
-        // Midnight ground cascades to match midnight sky horizon
-        groundGrad.addColorStop(0, '#211408');   // Midnight Harvest Gold
-        groundGrad.addColorStop(0.4, '#1a160d');  // Midnight Calico
-        groundGrad.addColorStop(0.7, '#17150f');  // Midnight Hampton
-        groundGrad.addColorStop(1, '#070c0e');    // Midnight Smalt Blue
+        // Midnight ground cascades from horizon down to a very dark base
+        groundGrad.addColorStop(0, '#1e160e');    // Deep Harvest Gold matching sky
+        groundGrad.addColorStop(0.15, '#121611');  // Rapid fade to very dark
+        groundGrad.addColorStop(0.5, '#070a0c');   // Midnight Smalt Blue
+        groundGrad.addColorStop(1, '#030506');     // Almost black
       }
       ctx.fillStyle = groundGrad;
       ctx.fillRect(0, Math.max(0, horizonY), width, Math.max(0, height - horizonY));
@@ -1158,10 +1186,8 @@ export default function App() {
         // Project direction billboard onto sky height (y = 1.5)
         const p = project({ x: dir.x, y: 1.5, z: dir.z }, width, height, cameraRef.current);
         if (p) {
-          ctx.fillStyle = dir.color;
-          ctx.font = 'bold 11px monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText(dir.label, p.x, p.y);
+          // Direction names (North, East, etc.) deleted per user request to declutter the canvas.
+          // We still render the guide pin and dynamic ray to preserve precise spatial reference.
 
           // Draw vertical guideline down to ground
           const groundP = project({ x: dir.x, y: -0.7, z: dir.z }, width, height, cameraRef.current);
@@ -1350,13 +1376,22 @@ export default function App() {
       </header>
 
       {/* 4. FLOATING CANVAS HUD DECORATION & USER OVERLAYS */}
-      {/* TRANSFORMATION CONTROLS DESCRIPTION OVERLAY */}
-      <div className="absolute bottom-24 md:bottom-28 left-1/2 -translate-x-1/2 bg-zinc-900/95 backdrop-blur-xs text-zinc-200 text-[10px] py-2 px-4 rounded-full pointer-events-none font-mono tracking-wider uppercase flex items-center gap-2 border border-zinc-800 shadow-lg select-none z-10 max-w-[90vw] text-center">
-        <Sparkles className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
-        <span className="truncate">
-          Move: WASD / Arrow keys or Touch Joystick • Click Sound Nodes to Inspector
-        </span>
-      </div>
+      {showMoveHint && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-45 bg-black/15 backdrop-blur-xs transition-opacity duration-500 animate-fade-in">
+          <div className="bg-zinc-950/95 border border-zinc-800 text-zinc-200 py-5 px-7 rounded-2xl shadow-2xl flex flex-col items-center gap-2.5 max-w-sm text-center select-none animate-scale-up pointer-events-auto">
+            <Sparkles className="w-5 h-5 text-amber-400 animate-pulse shrink-0" />
+            <h4 className="text-xs font-bold font-mono tracking-widest uppercase text-white">
+              Navigation Controls
+            </h4>
+            <p className="text-[11px] text-zinc-300 leading-normal font-sans">
+              Explore the 3D room using <strong>WASD / Arrow keys</strong> or the <strong>Touch Joystick</strong>.
+            </p>
+            <p className="text-[10px] text-zinc-400 font-sans border-t border-zinc-800/80 pt-2 w-full">
+              Click any colored sound node to inspect or rename it!
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 3. MOBILE CONTROLS / TOUCH JOYSTICK */}
       <div className="absolute bottom-6 left-6 z-10 block pointer-events-auto">
@@ -1380,13 +1415,17 @@ export default function App() {
               return (
                 <div id="inspector-overlay-card" className="p-4 bg-white border border-zinc-950 shadow-md rounded-xl flex flex-col gap-2.5">
                   <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-[10px] font-bold text-zinc-400 font-mono uppercase tracking-widest">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-bold text-zinc-400 font-mono uppercase tracking-widest mb-1.5">
                         Active Sound Selected
                       </p>
-                      <h4 className="text-sm font-extrabold text-zinc-900 tracking-tight font-sans">
-                        {s.name}
-                      </h4>
+                      <input
+                        type="text"
+                        value={s.name}
+                        onChange={(e) => handleUpdateSound(s.id, { name: e.target.value })}
+                        className="text-xs font-bold text-zinc-900 tracking-tight font-sans bg-zinc-50 border border-zinc-200 hover:border-zinc-400 focus:border-zinc-950 focus:ring-1 focus:ring-zinc-950 px-2 py-1 rounded-lg w-full transition-all focus:outline-hidden"
+                        placeholder="Rename sound source..."
+                      />
                     </div>
                     <button
                       id="close-inspector-btn"
@@ -1540,6 +1579,27 @@ export default function App() {
               Resume Exploration
             </button>
           </div>
+        </div>
+      )}
+
+      {/* 8. COOKIE CONSENT BANNER */}
+      {showCookieBanner && (
+        <div className="fixed bottom-4 left-4 right-4 md:left-6 md:right-auto md:max-w-md bg-zinc-900/95 backdrop-blur-md text-zinc-100 p-4 rounded-xl border border-zinc-800 shadow-2xl z-50 animate-slide-up flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 select-none">
+          <div className="flex-1">
+            <p className="text-xs font-semibold tracking-tight text-zinc-100 flex items-center gap-1.5 mb-1 font-sans">
+              🍪 Cookie Settings
+            </p>
+            <p className="text-[10px] text-zinc-400 leading-normal font-sans">
+              We use local storage cookies to securely preserve your virtual coordinates, custom spatial soundtracks, and recording preferences.
+            </p>
+          </div>
+          <button
+            id="accept-cookies-btn"
+            onClick={handleAcceptCookies}
+            className="w-full sm:w-auto shrink-0 bg-white hover:bg-zinc-200 text-zinc-950 text-[10px] font-extrabold uppercase tracking-widest px-4 py-2 rounded-lg cursor-pointer transition-all text-center border border-zinc-100"
+          >
+            Accept
+          </button>
         </div>
       )}
 

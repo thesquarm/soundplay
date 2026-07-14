@@ -53,8 +53,23 @@ export default function SoundList({
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(micChunksRef.current, { type: 'audio/wav' });
-        const file = new File([blob], `mic_recording_${Date.now()}.wav`, { type: 'audio/wav' });
+        // Use the actual MIME type of the recorded chunks
+        const actualMimeType = mediaRecorder.mimeType || 'audio/mp4';
+        const blob = new Blob(micChunksRef.current, { type: actualMimeType });
+        
+        // Determine correct file extension based on mimeType
+        let extension = 'mp4';
+        if (actualMimeType.includes('webm')) {
+          extension = 'webm';
+        } else if (actualMimeType.includes('ogg')) {
+          extension = 'ogg';
+        } else if (actualMimeType.includes('wav')) {
+          extension = 'wav';
+        } else if (actualMimeType.includes('aac')) {
+          extension = 'aac';
+        }
+        
+        const file = new File([blob], `mic_recording_${Date.now()}.${extension}`, { type: actualMimeType });
         
         // Spawn node with name "Recorded Sound"
         onAddSound('uploaded', `Recorded Sound #${sounds.length + 1}`, file);
@@ -113,7 +128,7 @@ export default function SoundList({
   return (
     <div className="flex flex-col h-full bg-white w-full md:w-80 select-none">
       {/* List Header */}
-      <div className="p-4 bg-zinc-50/50 flex flex-col gap-1">
+      <div className="p-4 bg-zinc-50/50 flex flex-col gap-1 border-b border-zinc-100">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold tracking-tight text-zinc-900 font-sans flex items-center gap-2">
             <Music className="w-4 h-4 text-zinc-500" />
@@ -133,6 +148,70 @@ export default function SoundList({
         <p className="text-xs text-zinc-500 mt-1">
           Adjust, mute, teleport, or append custom audio nodes below.
         </p>
+      </div>
+
+      {/* 1. Direct Add Custom Sound Actions (Highly Prominent at Top of Menu) */}
+      <div className="p-4 border-b border-zinc-100 bg-zinc-50/30 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-extrabold uppercase tracking-wider text-zinc-400 font-mono">
+            Direct Add Custom Sound
+          </span>
+          <span className="flex h-2 w-2 relative">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+          </span>
+        </div>
+        
+        <div className="grid grid-cols-2 gap-2">
+          {/* Upload Button */}
+          <div className="relative">
+            <input
+              ref={fileInputRef}
+              id="audio-file-upload"
+              type="file"
+              accept="audio/*"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+            <button
+              id="trigger-upload-btn"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full flex flex-col items-center justify-center gap-1.5 py-2.5 px-3 border border-zinc-200 hover:border-zinc-900 rounded-xl bg-white hover:bg-zinc-50 text-xs font-bold text-zinc-800 shadow-2xs hover:shadow-xs transition-all cursor-pointer text-center"
+            >
+              <Upload className="w-4 h-4 text-zinc-600" />
+              <span>Upload File</span>
+            </button>
+          </div>
+
+          {/* Record Live Button */}
+          <div>
+            {!isRecordingMic ? (
+              <button
+                id="start-mic-record-btn"
+                onClick={startMicRecording}
+                className="w-full flex flex-col items-center justify-center gap-1.5 py-2.5 px-3 border border-red-100 hover:border-red-400 rounded-xl bg-red-50/30 hover:bg-red-50 text-xs font-bold text-red-700 shadow-2xs hover:shadow-xs transition-all cursor-pointer text-center animate-none"
+              >
+                <Mic className="w-4 h-4 text-red-500" />
+                <span>Record Live</span>
+              </button>
+            ) : (
+              <button
+                id="stop-mic-record-btn"
+                onClick={stopMicRecording}
+                className="w-full flex flex-col items-center justify-center gap-1.5 py-2.5 px-3 border border-red-600 rounded-xl bg-red-600 text-xs font-bold text-white shadow-md hover:bg-red-700 transition-all cursor-pointer text-center animate-pulse"
+              >
+                <Square className="w-4 h-4 fill-white text-white" />
+                <span>Stop ({micSeconds}s)</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {micError && (
+          <p className="text-[10px] text-red-500 mt-1 text-center font-semibold">
+            ⚠️ {micError}
+          </p>
+        )}
       </div>
 
       {/* Dynamic List */}
@@ -158,11 +237,15 @@ export default function SoundList({
               >
                 {/* Title & Type */}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-zinc-900 truncate font-sans">
-                      {sound.name}
-                    </p>
-                    <p className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono mt-0.5">
+                  <div className="flex-1 min-w-0">
+                    <input
+                      type="text"
+                      value={sound.name}
+                      onChange={(e) => onUpdateSound(sound.id, { name: e.target.value })}
+                      className="text-xs font-semibold text-zinc-900 bg-transparent hover:bg-zinc-50 focus:bg-zinc-50 border border-transparent hover:border-zinc-200 focus:border-zinc-400 focus:outline-hidden px-1.5 py-0.5 rounded-sm w-full transition-all"
+                      placeholder="Rename sound..."
+                    />
+                    <p className="text-[9px] text-zinc-400 uppercase tracking-widest font-mono mt-0.5 pl-1.5">
                       {sound.soundType}
                     </p>
                   </div>
@@ -242,10 +325,10 @@ export default function SoundList({
         )}
       </div>
 
-      {/* Add Sound Panel */}
-      <div className="p-4 space-y-3 bg-zinc-50/50">
-        <h3 className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider font-mono">
-          Create Sound Node
+      {/* Add Sound Panel (Presets only!) */}
+      <div className="p-4 space-y-3 bg-zinc-50/50 border-t border-zinc-100">
+        <h3 className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider font-mono">
+          Quick-Add World Presets
         </h3>
         
         {/* Presets Grid */}
@@ -255,83 +338,29 @@ export default function SoundList({
             onClick={() => onAddSound('north', 'Forest Birds')}
             className="flex flex-col items-center justify-center p-2 rounded-lg border border-zinc-200 hover:border-[#577E89] bg-[#577E89]/5 hover:bg-[#577E89]/10 transition-all cursor-pointer text-center"
           >
-            <span className="text-[10px] font-semibold text-zinc-700">▲ North (Smalt Blue)</span>
+            <span className="text-[9px] font-bold text-zinc-700">▲ North (Smalt Blue)</span>
           </button>
           <button
             id="add-east-btn"
             onClick={() => onAddSound('east', 'Honeybees')}
             className="flex flex-col items-center justify-center p-2 rounded-lg border border-zinc-200 hover:border-[#DEC484] bg-[#DEC484]/5 hover:bg-[#DEC484]/10 transition-all cursor-pointer text-center"
           >
-            <span className="text-[10px] font-semibold text-zinc-700">▶ East (Calico)</span>
+            <span className="text-[9px] font-bold text-zinc-700">▶ East (Calico)</span>
           </button>
           <button
             id="add-south-btn"
             onClick={() => onAddSound('south', 'Rain & Thunder')}
             className="flex flex-col items-center justify-center p-2 rounded-lg border border-zinc-200 hover:border-[#E1A36F] bg-[#E1A36F]/5 hover:bg-[#E1A36F]/10 transition-all cursor-pointer text-center"
           >
-            <span className="text-[10px] font-semibold text-zinc-700">▼ South (Harvest Gold)</span>
+            <span className="text-[9px] font-bold text-zinc-700">▼ South (Harvest Gold)</span>
           </button>
           <button
             id="add-west-btn"
             onClick={() => onAddSound('west', 'Hearing Resonance')}
             className="flex flex-col items-center justify-center p-2 rounded-lg border border-zinc-200 hover:border-[#6F9F9C] bg-[#6F9F9C]/5 hover:bg-[#6F9F9C]/10 transition-all cursor-pointer text-center"
           >
-            <span className="text-[10px] font-semibold text-zinc-700">◀ West (Sea Nymph)</span>
+            <span className="text-[9px] font-bold text-zinc-700">◀ West (Sea Nymph)</span>
           </button>
-        </div>
-
-        {/* Upload Custom File button */}
-        <div className="relative">
-          <input
-            ref={fileInputRef}
-            id="audio-file-upload"
-            type="file"
-            accept="audio/*"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-          <button
-            id="trigger-upload-btn"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 border border-zinc-300 rounded-lg bg-white hover:bg-zinc-50 text-xs font-medium text-zinc-700 hover:border-zinc-900 shadow-2xs transition-colors cursor-pointer"
-          >
-            <Upload className="w-3.5 h-3.5 text-zinc-500" />
-            Upload Sound File
-          </button>
-        </div>
-
-        {/* Live Microphone Recording Option */}
-        <div className="pt-3 mt-1">
-          {!isRecordingMic ? (
-            <button
-              id="start-mic-record-btn"
-              onClick={startMicRecording}
-              className="w-full flex items-center justify-center gap-2 py-2 px-3 border border-red-200 rounded-lg bg-red-50/50 hover:bg-red-50 text-xs font-semibold text-red-700 hover:border-red-400 shadow-2xs transition-colors cursor-pointer"
-            >
-              <Mic className="w-3.5 h-3.5 text-red-500" />
-              Record Live Audio (Mic)
-            </button>
-          ) : (
-            <button
-              id="stop-mic-record-btn"
-              onClick={stopMicRecording}
-              className="w-full flex items-center justify-between gap-2 py-2 px-3 border border-red-600 rounded-lg bg-red-600 text-xs font-bold text-white shadow-sm hover:bg-red-700 transition-colors cursor-pointer animate-pulse"
-            >
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-white animate-ping" />
-                Recording Mic ({micSeconds}s)...
-              </span>
-              <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-mono">
-                <Square className="w-3 h-3 fill-white text-white" /> Stop
-              </span>
-            </button>
-          )}
-
-          {micError && (
-            <p className="text-[10px] text-red-500 mt-1.5 text-center font-medium">
-              ⚠️ {micError}
-            </p>
-          )}
         </div>
       </div>
     </div>
