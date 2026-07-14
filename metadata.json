@@ -1,0 +1,6 @@
+{
+  "name": "sound_play",
+  "description": "An immersive, minimalist 3D sketch soundscape explorer. Navigate a virtual landscape of jumping cubes representing spatialized sounds, record and export your performance, or upload your own audio files.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
