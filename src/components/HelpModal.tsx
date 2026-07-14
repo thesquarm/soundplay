@@ -26,6 +26,25 @@ export default function HelpModal({ onStart }: HelpModalProps) {
         {/* Divider */}
         <hr className="border-zinc-800" />
 
+        {/* Start Button & Recommendation */}
+        <div className="space-y-3">
+          <button
+            id="btn-start-soundscape"
+            onClick={onStart}
+            className="w-full flex items-center justify-center gap-2 py-3 bg-zinc-100 hover:bg-white text-zinc-950 font-semibold rounded-xl text-sm transition-all duration-150 transform hover:scale-[1.01] active:scale-95 shadow-md cursor-pointer border border-white"
+          >
+            Initialize & Start Soundscape
+            <ChevronRight className="w-4 h-4" />
+          </button>
+
+          <p className="text-[10px] text-center text-zinc-500 font-mono">
+            Recommend wearing headphones for the full spatial stereo experience.
+          </p>
+        </div>
+
+        {/* Divider */}
+        <hr className="border-zinc-800" />
+
         {/* Instructions Columns */}
         <div className="space-y-4">
           <h2 className="text-xs font-bold font-mono tracking-wider text-zinc-400 uppercase">
@@ -68,21 +87,6 @@ export default function HelpModal({ onStart }: HelpModalProps) {
             </p>
           </div>
         </div>
-
-        {/* Start Button */}
-        <button
-          id="btn-start-soundscape"
-          onClick={onStart}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-zinc-100 hover:bg-white text-zinc-950 font-semibold rounded-xl text-sm transition-all duration-150 transform hover:scale-[1.01] active:scale-95 shadow-md cursor-pointer border border-white"
-        >
-          Initialize & Start Soundscape
-          <ChevronRight className="w-4 h-4" />
-        </button>
-
-        {/* Subtitle / Tip */}
-        <p className="text-[10px] text-center text-zinc-500 font-mono">
-          Recommend wearing headphones for the full spatial stereo experience.
-        </p>
       </div>
     </div>
   );

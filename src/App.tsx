@@ -18,7 +18,10 @@ import {
   Sun,
   Moon,
   ListMusic,
-  Radio
+  Radio,
+  Upload,
+  Mic,
+  Square
 } from 'lucide-react';
 import { audioService } from './audioEngine';
 import { SoundSource, CameraState, SoundType } from './types';
@@ -115,6 +118,21 @@ export default function App() {
     localStorage.setItem('soundplay_cookies_accepted', 'true');
     setShowCookieBanner(false);
   };
+
+  // Top level mic recording & upload state
+  const topFileInputRef = useRef<HTMLInputElement>(null);
+  const [isRecordingMic, setIsRecordingMic] = useState(false);
+  const [micSeconds, setMicSeconds] = useState(0);
+  const [micError, setMicError] = useState<string | null>(null);
+  const micMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const micChunksRef = useRef<Blob[]>([]);
+  const micTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (micTimerRef.current) clearInterval(micTimerRef.current);
+    };
+  }, []);
 
   // Dust particles ref
   const dustParticlesRef = useRef<{ x: number; y: number; z: number; speedY: number; size: number; phase: number }[]>([]);
@@ -289,6 +307,76 @@ export default function App() {
     if (selectedSoundId === id) {
       setSelectedSoundId(null);
     }
+  };
+
+  const startMicRecording = async () => {
+    setMicError(null);
+    micChunksRef.current = [];
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      micMediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          micChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const actualMimeType = mediaRecorder.mimeType || 'audio/mp4';
+        const blob = new Blob(micChunksRef.current, { type: actualMimeType });
+        
+        let extension = 'mp4';
+        if (actualMimeType.includes('webm')) {
+          extension = 'webm';
+        } else if (actualMimeType.includes('ogg')) {
+          extension = 'ogg';
+        } else if (actualMimeType.includes('wav')) {
+          extension = 'wav';
+        } else if (actualMimeType.includes('aac')) {
+          extension = 'aac';
+        }
+        
+        const file = new File([blob], `mic_recording_${Date.now()}.${extension}`, { type: actualMimeType });
+        
+        handleAddSound('uploaded', `Recorded Sound #${sounds.length + 1}`, file);
+
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecordingMic(true);
+      setMicSeconds(0);
+
+      micTimerRef.current = setInterval(() => {
+        setMicSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.error('Mic access failed:', err);
+      setMicError('Microphone access denied or unavailable.');
+    }
+  };
+
+  const stopMicRecording = () => {
+    if (micMediaRecorderRef.current && isRecordingMic) {
+      micMediaRecorderRef.current.stop();
+      setIsRecordingMic(false);
+      if (micTimerRef.current) {
+        clearInterval(micTimerRef.current);
+        micTimerRef.current = null;
+      }
+    }
+  };
+
+  const handleTopFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    const name = file.name.split('.')[0] || 'Custom Sound';
+    
+    handleAddSound('uploaded', name, file);
   };
 
   const handleAddSound = async (type: SoundType, name: string, file?: File) => {
@@ -1277,6 +1365,52 @@ export default function App() {
 
         {/* Quick Toolbar */}
         <div className="flex items-center gap-1.5 pointer-events-auto">
+          {/* EXTRA DIRECT UPLOAD BUTTON */}
+          <div className="relative">
+            <input
+              ref={topFileInputRef}
+              id="top-audio-file-upload"
+              type="file"
+              accept="audio/*"
+              onChange={handleTopFileUpload}
+              className="hidden"
+            />
+            <button
+              id="top-trigger-upload-btn"
+              onClick={() => topFileInputRef.current?.click()}
+              className="p-2 rounded-lg border border-zinc-800 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 hover:border-zinc-500 hover:text-white transition-all duration-150 cursor-pointer shadow-sm flex items-center gap-1.5"
+              title="Direct Upload Custom Audio File"
+            >
+              <Upload className="w-4 h-4 text-zinc-300" />
+              <span className="text-[9px] font-mono font-extrabold hidden md:inline">UPLOAD FILE</span>
+            </button>
+          </div>
+
+          {/* EXTRA DIRECT RECORD LIVE BUTTON */}
+          <div>
+            {!isRecordingMic ? (
+              <button
+                id="top-start-mic-record-btn"
+                onClick={startMicRecording}
+                className="p-2 rounded-lg border border-red-950/60 bg-red-950/35 hover:bg-red-950 hover:text-white hover:border-red-600 transition-all duration-150 cursor-pointer shadow-sm flex items-center gap-1.5 text-red-400"
+                title="Direct Record Live Audio"
+              >
+                <Mic className="w-4 h-4 text-red-400 animate-pulse" />
+                <span className="text-[9px] font-mono font-extrabold hidden md:inline">RECORD LIVE</span>
+              </button>
+            ) : (
+              <button
+                id="top-stop-mic-record-btn"
+                onClick={stopMicRecording}
+                className="p-2 rounded-lg border border-red-600 bg-red-600 text-white transition-all duration-150 cursor-pointer shadow-sm flex items-center gap-1.5 animate-pulse"
+                title={`Recording... Click to Stop (${micSeconds}s)`}
+              >
+                <Square className="w-4 h-4 fill-white text-white" />
+                <span className="text-[9px] font-mono font-extrabold hidden md:inline">STOP ({micSeconds}s)</span>
+              </button>
+            )}
+          </div>
+
           {/* Toggle Soundscape Sources Button */}
           <button
             id="toggle-sources-btn"
@@ -1373,6 +1507,13 @@ export default function App() {
             <HelpCircle className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Microphone Error Banner */}
+        {micError && (
+          <div className="absolute top-18 right-4 bg-red-950/95 border border-red-800 text-red-400 text-[10px] px-3 py-1.5 rounded-lg shadow-lg font-mono pointer-events-auto animate-bounce z-50">
+            ⚠️ {micError}
+          </div>
+        )}
       </header>
 
       {/* 4. FLOATING CANVAS HUD DECORATION & USER OVERLAYS */}
