@@ -40,12 +40,52 @@ interface SceneryItem {
   scale: number;
 }
 
+// Color interpolation helper functions for smooth day/night transition
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+
+function parseHex(hex: string) {
+  const cleanHex = hex.replace('#', '');
+  const r = parseInt(cleanHex.substring(0, 2), 16);
+  const g = parseInt(cleanHex.substring(2, 4), 16);
+  const b = parseInt(cleanHex.substring(4, 6), 16);
+  return { r, g, b };
+}
+
+function lerpColor(color1: string, color2: string, t: number): string {
+  if (color1.startsWith('#') && color2.startsWith('#')) {
+    const c1 = parseHex(color1);
+    const c2 = parseHex(color2);
+    const r = Math.round(lerp(c1.r, c2.r, t));
+    const g = Math.round(lerp(c1.g, c2.g, t));
+    const b = Math.round(lerp(c1.b, c2.b, t));
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+  return t < 0.5 ? color1 : color2;
+}
+
+function lerpColorWithAlpha(
+  r1: number, g1: number, b1: number, a1: number,
+  r2: number, g2: number, b2: number, a2: number,
+  t: number
+): string {
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  const a = a1 + (a2 - a1) * t;
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
 export default function App() {
   const [isDay, setIsDay] = useState(false);
   const isDayRef = useRef(isDay);
   useEffect(() => {
     isDayRef.current = isDay;
   }, [isDay]);
+
+  const dayTransitionRef = useRef(0.0); // 0 = night, 1 = day
+  const lastTimeRef = useRef(performance.now());
 
   const [isStarted, setIsStarted] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -623,6 +663,19 @@ export default function App() {
 
       const { width, height } = canvas;
 
+      // Calculate smooth frame-rate independent day/night transition (5 seconds)
+      const now = performance.now();
+      const deltaTime = (now - lastTimeRef.current) / 1000;
+      lastTimeRef.current = now;
+
+      if (isDayRef.current) {
+        dayTransitionRef.current = Math.min(1.0, dayTransitionRef.current + deltaTime / 5.0);
+      } else {
+        dayTransitionRef.current = Math.max(0.0, dayTransitionRef.current - deltaTime / 5.0);
+      }
+
+      const transitionT = dayTransitionRef.current; // 0 = night, 1 = day
+
       // 1. HANDLE PLAYER MOVEMENT (Egoshooter Style Keyboard & Joystick Traversal)
       let moveSpeed = 0.12;
       let rotateSpeed = 0.035;
@@ -673,15 +726,9 @@ export default function App() {
       // 2. RECALCULATE SPATIAL AUDIO NODES
       audioService.updateSpatialAudio(cameraRef.current, sounds, isMuted);
 
-      const isDay = isDayRef.current;
-
-      // 3. CANVAS CLEAR (Depending on Day/Night)
+      // 3. CANVAS CLEAR (Depending on Day/Night smoothly interpolated)
       // We render a stunning, colorful sky gradient above the horizon line, and a solid ground below!
-      if (isDay) {
-        ctx.fillStyle = '#E2D8A5'; // Hampton background
-      } else {
-        ctx.fillStyle = '#0a1215'; // Midnight Smalt Blue background
-      }
+      ctx.fillStyle = lerpColor('#0a1215', '#E2D8A5', transitionT);
       ctx.fillRect(0, 0, width, height);
 
       // Dynamic 3D Perspective Horizon Line Position
@@ -690,39 +737,31 @@ export default function App() {
 
       // Draw a colorful sky gradient from top of screen (0) to horizonY
       const skyGrad = ctx.createLinearGradient(0, 0, 0, Math.max(horizonY, 50));
-      if (isDay) {
-        // Day Palette Sky: Smalt Blue -> Sea Nymph -> Calico -> Harvest Gold at the horizon
-        skyGrad.addColorStop(0, '#577E89');   // Smalt Blue
-        skyGrad.addColorStop(0.35, '#6F9F9C'); // Sea Nymph
-        skyGrad.addColorStop(0.7, '#DEC484');  // Calico
-        skyGrad.addColorStop(1, '#E1A36F');    // Harvest Gold
-      } else {
-        // Deep midnight sky extending almost all the way down, compressing twilight colors right at the horizon
-        skyGrad.addColorStop(0, '#040708');     // Pitch dark space
-        skyGrad.addColorStop(0.65, '#070b0d');   // Very deep Midnight Smalt Blue
-        skyGrad.addColorStop(0.82, '#0c1514');   // Deep Sea Nymph glow
-        skyGrad.addColorStop(0.92, '#181a14');   // Deep Calico glow
-        skyGrad.addColorStop(1, '#1e160e');      // Deep Harvest Gold glow at the horizon
-      }
+      skyGrad.addColorStop(0, lerpColor('#040708', '#577E89', transitionT));
+      skyGrad.addColorStop(0.4, lerpColor('#070b0d', '#6F9F9C', transitionT));
+      skyGrad.addColorStop(0.75, lerpColor('#0c1514', '#DEC484', transitionT));
+      skyGrad.addColorStop(0.9, lerpColor('#181a14', '#DEC484', transitionT));
+      skyGrad.addColorStop(1, lerpColor('#1e160e', '#E1A36F', transitionT));
       ctx.fillStyle = skyGrad;
       ctx.fillRect(0, 0, width, Math.max(0, horizonY));
 
-      // In Night mode, render beautiful glowing nebulae and colorful twinkling stars using the light palette colors
-      if (!isDay) {
+      // Render beautiful glowing nebulae and colorful twinkling stars with fade opacity mapped to the transition
+      if (transitionT < 0.95) {
+        const nightFactor = 1.0 - transitionT;
         const timeFactor = Date.now() / 1000;
 
         // Nebula 1: Soft Sea Nymph (#6F9F9C) celestial glow in upper-left sky
         const neb1 = ctx.createRadialGradient(width * 0.25, horizonY * 0.4, 5, width * 0.25, horizonY * 0.4, Math.max(width * 0.35, 200));
-        neb1.addColorStop(0, 'rgba(111, 159, 156, 0.12)'); // Sea Nymph with low opacity
-        neb1.addColorStop(0.5, 'rgba(111, 159, 156, 0.04)');
+        neb1.addColorStop(0, `rgba(111, 159, 156, ${0.12 * nightFactor})`); // Sea Nymph with low opacity
+        neb1.addColorStop(0.5, `rgba(111, 159, 156, ${0.04 * nightFactor})`);
         neb1.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = neb1;
         ctx.fillRect(0, 0, width, Math.max(0, horizonY));
 
         // Nebula 2: Soft Hampton (#E2D8A5) & Calico (#DEC484) glow in upper-right sky
         const neb2 = ctx.createRadialGradient(width * 0.75, horizonY * 0.3, 5, width * 0.75, horizonY * 0.3, Math.max(width * 0.4, 250));
-        neb2.addColorStop(0, 'rgba(226, 216, 165, 0.10)'); // Hampton
-        neb2.addColorStop(0.5, 'rgba(222, 196, 132, 0.04)'); // Calico
+        neb2.addColorStop(0, `rgba(226, 216, 165, ${0.10 * nightFactor})`); // Hampton
+        neb2.addColorStop(0.5, `rgba(222, 196, 132, ${0.04 * nightFactor})`); // Calico
         neb2.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = neb2;
         ctx.fillRect(0, 0, width, Math.max(0, horizonY));
@@ -744,7 +783,7 @@ export default function App() {
             starColor = 'rgba(225, 163, 111, '; // Harvest Gold
           }
           
-          ctx.fillStyle = `${starColor}${Math.max(0.12, Math.min(0.95, brightness))})`;
+          ctx.fillStyle = `${starColor}${Math.max(0.12, Math.min(0.95, brightness)) * nightFactor})`;
           ctx.beginPath();
           ctx.arc(sX, sY, size, 0, Math.PI * 2);
           ctx.fill();
@@ -753,24 +792,15 @@ export default function App() {
 
       // Draw Ground base below horizonY - fading perfectly into the sky with NO BORDER
       const groundGrad = ctx.createLinearGradient(0, horizonY, 0, height);
-      if (isDay) {
-        // Starts exactly with Harvest Gold to match sky ending, and cascades down the palette
-        groundGrad.addColorStop(0, '#E1A36F');   // Harvest Gold
-        groundGrad.addColorStop(0.4, '#DEC484');  // Calico
-        groundGrad.addColorStop(0.7, '#E2D8A5');  // Hampton
-        groundGrad.addColorStop(1, '#577E89');    // Smalt Blue
-      } else {
-        // Midnight ground cascades from horizon down to a very dark base
-        groundGrad.addColorStop(0, '#1e160e');    // Deep Harvest Gold matching sky
-        groundGrad.addColorStop(0.15, '#121611');  // Rapid fade to very dark
-        groundGrad.addColorStop(0.5, '#070a0c');   // Midnight Smalt Blue
-        groundGrad.addColorStop(1, '#030506');     // Almost black
-      }
+      groundGrad.addColorStop(0, lerpColor('#1e160e', '#E1A36F', transitionT));
+      groundGrad.addColorStop(0.25, lerpColor('#121611', '#DEC484', transitionT));
+      groundGrad.addColorStop(0.65, lerpColor('#070a0c', '#E2D8A5', transitionT));
+      groundGrad.addColorStop(1, lerpColor('#030506', '#577E89', transitionT));
       ctx.fillStyle = groundGrad;
       ctx.fillRect(0, Math.max(0, horizonY), width, Math.max(0, height - horizonY));
 
       // Sketch texture overlay: fine subtle grid using the custom Smalt Blue palette color
-      ctx.strokeStyle = isDay ? 'rgba(87, 126, 137, 0.04)' : 'rgba(87, 126, 137, 0.02)';
+      ctx.strokeStyle = `rgba(87, 126, 137, ${lerp(0.02, 0.04, transitionT)})`;
       ctx.lineWidth = 1;
       for (let i = 0; i < width; i += 40) {
         ctx.beginPath();
@@ -789,23 +819,24 @@ export default function App() {
 
       // Render the 4 directional glows on the far horizon (Compass directions matching custom palette)
       const horizonGlows = [
-        { x: 0, z: 1200, color: isDay ? 'rgba(87, 126, 137, 0.28)' : 'rgba(87, 126, 137, 0.35)', label: 'North' },  // Smalt Blue
-        { x: 1200, z: 0, color: isDay ? 'rgba(222, 196, 132, 0.24)' : 'rgba(222, 196, 132, 0.32)', label: 'East' },   // Calico
-        { x: 0, z: -1200, color: isDay ? 'rgba(225, 163, 111, 0.24)' : 'rgba(225, 163, 111, 0.32)', label: 'South' },  // Harvest Gold
-        { x: -1200, z: 0, color: isDay ? 'rgba(111, 159, 156, 0.24)' : 'rgba(111, 159, 156, 0.32)', label: 'West' },   // Sea Nymph
+        { x: 0, z: 1200, label: 'North', rgb: '87, 126, 137', alphaNight: 0.35, alphaDay: 0.28 },
+        { x: 1200, z: 0, label: 'East', rgb: '222, 196, 132', alphaNight: 0.32, alphaDay: 0.24 },
+        { x: 0, z: -1200, label: 'South', rgb: '225, 163, 111', alphaNight: 0.32, alphaDay: 0.24 },
+        { x: -1200, z: 0, label: 'West', rgb: '111, 159, 156', alphaNight: 0.32, alphaDay: 0.24 },
       ];
 
       horizonGlows.forEach((dir) => {
-        // Project as absolute coordinates in the far distance
         const pt = project({ x: dir.x, y: -0.1, z: dir.z }, width, height, cameraRef.current);
         if (pt) {
-          // Draw a soft radial gradient representing the horizon glow
+          const glowAlpha = lerp(dir.alphaNight, dir.alphaDay, transitionT);
+          const baseColor = `rgba(${dir.rgb}, ${glowAlpha})`;
+          
           const glowRadius = Math.max(width * 0.45, 480);
           const grad = ctx.createRadialGradient(pt.x, pt.y, 10, pt.x, pt.y, glowRadius);
-          grad.addColorStop(0, dir.color);
-          grad.addColorStop(0.35, dir.color.replace('0.24', '0.08').replace('0.28', '0.08').replace('0.14', '0.04').replace('0.16', '0.05').replace('0.32', '0.10').replace('0.35', '0.12'));
-          grad.addColorStop(0.7, dir.color.replace('0.24', '0.02').replace('0.28', '0.02').replace('0.14', '0.01').replace('0.16', '0.01').replace('0.32', '0.03').replace('0.35', '0.03'));
-          grad.addColorStop(1, isDay ? 'rgba(225, 163, 111, 0)' : 'rgba(33, 20, 8, 0)');
+          grad.addColorStop(0, baseColor);
+          grad.addColorStop(0.35, `rgba(${dir.rgb}, ${glowAlpha * 0.32})`);
+          grad.addColorStop(0.7, `rgba(${dir.rgb}, ${glowAlpha * 0.08})`);
+          grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
           
           ctx.fillStyle = grad;
           ctx.beginPath();
@@ -815,7 +846,7 @@ export default function App() {
       });
 
       // A. Ground grid (3D sketchy wireframe lines) - Soft Hampton-tinted glow at night
-      ctx.strokeStyle = isDay ? 'rgba(15, 23, 42, 0.06)' : 'rgba(226, 216, 165, 0.09)'; // faint ground grid
+      ctx.strokeStyle = lerpColorWithAlpha(226, 216, 165, 0.09, 15, 23, 42, 0.06, transitionT); // faint ground grid
       ctx.lineWidth = 0.5;
       const gridSize = 25;
       const step = 1.5;
@@ -894,8 +925,8 @@ export default function App() {
 
       // B. Static Scenery Objects (Minimalist Sketches)
       scenery.forEach((item) => {
-        const sceneryStroke = isDay ? 'rgba(15, 23, 42, 0.35)' : 'rgba(111, 159, 156, 0.55)'; // glowing Sea Nymph wireframe at night
-        const sceneryLightStroke = isDay ? 'rgba(15, 23, 42, 0.25)' : 'rgba(222, 196, 132, 0.45)'; // glowing Calico wireframe at night
+        const sceneryStroke = lerpColorWithAlpha(111, 159, 156, 0.55, 15, 23, 42, 0.35, transitionT); // glowing Sea Nymph wireframe at night
+        const sceneryLightStroke = lerpColorWithAlpha(222, 196, 132, 0.45, 15, 23, 42, 0.25, transitionT); // glowing Calico wireframe at night
         const drawScenery = () => {
           if (item.type === 'monolith') {
             // A floating or standing slab wireframe
@@ -1375,52 +1406,6 @@ export default function App() {
 
         {/* Quick Toolbar */}
         <div className="flex items-center gap-1.5 pointer-events-auto">
-          {/* EXTRA DIRECT UPLOAD BUTTON */}
-          <div className="relative">
-            <input
-              ref={topFileInputRef}
-              id="top-audio-file-upload"
-              type="file"
-              accept="audio/*"
-              onChange={handleTopFileUpload}
-              className="hidden"
-            />
-            <button
-              id="top-trigger-upload-btn"
-              onClick={() => topFileInputRef.current?.click()}
-              className="p-2 rounded-lg border border-zinc-800 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 hover:border-zinc-500 hover:text-white transition-all duration-150 cursor-pointer shadow-sm flex items-center gap-1.5"
-              title="Direct Upload Custom Audio File"
-            >
-              <Upload className="w-4 h-4 text-zinc-300" />
-              <span className="text-[9px] font-mono font-extrabold hidden md:inline">UPLOAD FILE</span>
-            </button>
-          </div>
-
-          {/* EXTRA DIRECT RECORD LIVE BUTTON */}
-          <div>
-            {!isRecordingMic ? (
-              <button
-                id="top-start-mic-record-btn"
-                onClick={startMicRecording}
-                className="p-2 rounded-lg border border-red-950/60 bg-red-950/35 hover:bg-red-950 hover:text-white hover:border-red-600 transition-all duration-150 cursor-pointer shadow-sm flex items-center gap-1.5 text-red-400"
-                title="Direct Record Live Audio"
-              >
-                <Mic className="w-4 h-4 text-red-400 animate-pulse" />
-                <span className="text-[9px] font-mono font-extrabold hidden md:inline">RECORD LIVE</span>
-              </button>
-            ) : (
-              <button
-                id="top-stop-mic-record-btn"
-                onClick={stopMicRecording}
-                className="p-2 rounded-lg border border-red-600 bg-red-600 text-white transition-all duration-150 cursor-pointer shadow-sm flex items-center gap-1.5 animate-pulse"
-                title={`Recording... Click to Stop (${micSeconds}s)`}
-              >
-                <Square className="w-4 h-4 fill-white text-white" />
-                <span className="text-[9px] font-mono font-extrabold hidden md:inline">STOP ({micSeconds}s)</span>
-              </button>
-            )}
-          </div>
-
           {/* Toggle Soundscape Sources Button */}
           <button
             id="toggle-sources-btn"
@@ -1569,9 +1554,58 @@ export default function App() {
         />
       </div>
 
-      {/* Selected Sound Inspector (Overlay HUD) */}
+      {/* 3B. BOTTOM-RIGHT CONTENT CREATION BUTTON CLUSTER */}
+      <div className="absolute bottom-6 right-6 z-30 flex items-center gap-2 pointer-events-auto select-none">
+        {/* DIRECT UPLOAD BUTTON */}
+        <div className="relative">
+          <input
+            ref={topFileInputRef}
+            id="top-audio-file-upload"
+            type="file"
+            accept="audio/*"
+            onChange={handleTopFileUpload}
+            className="hidden"
+          />
+          <button
+            id="top-trigger-upload-btn"
+            onClick={() => topFileInputRef.current?.click()}
+            className="px-3.5 py-2.5 rounded-xl border border-zinc-800 bg-zinc-950/95 text-zinc-100 hover:bg-zinc-900 hover:border-zinc-500 hover:text-white hover:scale-[1.03] active:scale-95 transition-all duration-150 cursor-pointer shadow-xl flex items-center gap-2"
+            title="Direct Upload Custom Audio File"
+          >
+            <Upload className="w-4 h-4 text-indigo-400" />
+            <span className="text-[10px] font-mono font-extrabold tracking-wider">UPLOAD</span>
+          </button>
+        </div>
+
+        {/* DIRECT RECORD LIVE BUTTON */}
+        <div>
+          {!isRecordingMic ? (
+            <button
+              id="top-start-mic-record-btn"
+              onClick={startMicRecording}
+              className="px-3.5 py-2.5 rounded-xl border border-red-950/80 bg-red-950/45 text-red-400 hover:bg-red-950/90 hover:border-red-500 hover:scale-[1.03] active:scale-95 transition-all duration-150 cursor-pointer shadow-xl flex items-center gap-2"
+              title="Direct Record Live Audio"
+            >
+              <Mic className="w-4 h-4 text-red-400 animate-pulse" />
+              <span className="text-[10px] font-mono font-extrabold tracking-wider">RECORD</span>
+            </button>
+          ) : (
+            <button
+              id="top-stop-mic-record-btn"
+              onClick={stopMicRecording}
+              className="px-3.5 py-2.5 rounded-xl border border-red-600 bg-red-600 text-white hover:scale-[1.03] active:scale-95 transition-all duration-150 cursor-pointer shadow-xl flex items-center gap-2 animate-pulse"
+              title={`Recording... Click to Stop (${micSeconds}s)`}
+            >
+              <Square className="w-4 h-4 fill-white text-white animate-spin-slow" />
+              <span className="text-[10px] font-mono font-extrabold tracking-wider">STOP ({micSeconds}s)</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Selected Sound Inspector (Overlay HUD shifted up to sit neatly above the creator buttons) */}
       {selectedSoundId && (
-        <div className="absolute bottom-6 right-6 z-20 max-w-xs w-full pointer-events-auto">
+        <div className="absolute bottom-22 right-6 z-20 max-w-xs w-full pointer-events-auto">
           {sounds.find(s => s.id === selectedSoundId) ? (
             (() => {
               const s = sounds.find(sound => sound.id === selectedSoundId)!;
@@ -1659,8 +1693,8 @@ export default function App() {
         </div>
       )}
 
-      {/* 5. PERFORMANCE RECORDER FLOATING CONTROL */}
-      <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-6 z-20 max-w-sm w-[92vw] sm:w-85 bg-white border border-zinc-350 shadow-2xl rounded-2xl p-4 pointer-events-auto animate-slide-up ${showRecorder ? 'block' : 'hidden'}`}>
+      {/* 5. PERFORMANCE RECORDER FLOATING CONTROL shifted up above creator buttons */}
+      <div className={`absolute bottom-22 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-6 z-20 max-w-sm w-[92vw] sm:w-85 bg-white border border-zinc-350 shadow-2xl rounded-2xl p-4 pointer-events-auto animate-slide-up ${showRecorder ? 'block' : 'hidden'}`}>
         <div className="flex items-center justify-between mb-2 border-b border-zinc-100 pb-2">
           <h3 className="text-xs font-extrabold text-zinc-900 font-mono uppercase tracking-wider flex items-center gap-1.5">
             <Radio className="w-4 h-4 text-red-500 animate-pulse" />

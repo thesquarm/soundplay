@@ -7,28 +7,31 @@ interface HelpModalProps {
 
 export default function HelpModal({ onStart }: HelpModalProps) {
   return (
-    <div className="fixed inset-0 bg-[#0c0c0e] z-50 flex flex-col items-center justify-start sm:justify-center p-4 overflow-y-auto select-none pt-16 sm:pt-4">
-      {/* Invitability Background Glows */}
-      <div className="absolute top-10 left-10 w-44 h-44 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-20 right-10 w-56 h-56 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
+    <div className="fixed inset-0 bg-[#07070a] z-50 flex flex-col items-center justify-start sm:justify-center p-4 overflow-y-auto select-none pt-16 sm:pt-4">
+      {/* Invitability Background Glows with a rich, vibrant color palette */}
+      <div className="absolute top-4 left-4 w-72 h-72 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-1/4 right-4 w-80 h-80 bg-rose-500/15 rounded-full blur-3xl pointer-events-none animate-pulse duration-[6000ms]" />
+      <div className="absolute bottom-12 left-1/4 w-96 h-96 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-4 right-12 w-80 h-80 bg-amber-500/15 rounded-full blur-3xl pointer-events-none animate-pulse duration-[8000ms]" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="max-w-xl w-full border border-zinc-800 rounded-2xl p-6 md:p-8 bg-zinc-900/90 backdrop-blur-md shadow-2xl flex flex-col gap-6 relative z-10">
+      <div className="max-w-xl w-full border border-zinc-800/80 rounded-2xl p-6 md:p-8 bg-zinc-950/80 backdrop-blur-xl shadow-2xl flex flex-col gap-6 relative z-10 hover:border-zinc-700/50 transition-colors duration-500">
         
         {/* Sound Logo from Screenshot */}
         <div className="flex flex-col items-center justify-center text-center select-none">
-          <h1 className="text-3xl md:text-4xl font-black tracking-tight text-white font-sans uppercase">
+          <h1 className="text-3xl md:text-4xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-white via-zinc-100 to-zinc-400 font-sans uppercase">
             sound_play
           </h1>
-          <p className="text-[10px] md:text-xs font-bold tracking-[0.25em] text-zinc-400 font-mono uppercase mt-2">
-            A Live Conversational Sound Improviser
+          <p className="text-[10px] md:text-xs font-bold tracking-[0.25em] text-zinc-300 font-mono uppercase mt-2">
+            A spatial soundscape designer
           </p>
           
-          {/* Vertical lines and dot logo: | · | */}
-          <div className="flex items-center gap-1.5 mt-4">
-            <span className="w-1 h-5 bg-white rounded-full opacity-90" />
-            <span className="w-1.5 h-1.5 bg-white rounded-full opacity-90" />
-            <span className="w-1 h-5 bg-white rounded-full opacity-90" />
+          {/* Vertical lines and dot logo with colorful ambient aura: | · | */}
+          <div className="flex items-center gap-1.5 mt-4 relative">
+            <span className="w-1 h-5 bg-gradient-to-b from-indigo-400 to-indigo-600 rounded-full opacity-95 shadow-lg shadow-indigo-500/50" />
+            <span className="w-1.5 h-1.5 bg-rose-500 rounded-full opacity-95 shadow-lg shadow-rose-500/50 animate-ping absolute left-2.5" />
+            <span className="w-1.5 h-1.5 bg-rose-500 rounded-full opacity-95 shadow-lg shadow-rose-500/50" />
+            <span className="w-1 h-5 bg-gradient-to-b from-emerald-400 to-emerald-600 rounded-full opacity-95 shadow-lg shadow-emerald-500/50" />
           </div>
         </div>
 
