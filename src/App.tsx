@@ -21,7 +21,8 @@ import {
   Radio,
   Upload,
   Mic,
-  Square
+  Square,
+  Droplet
 } from 'lucide-react';
 import { audioService } from './audioEngine';
 import { SoundSource, CameraState, SoundType } from './types';
@@ -102,6 +103,7 @@ export default function App() {
   // Sound Sources State
   const [sounds, setSounds] = useState<SoundSource[]>([]);
   const [selectedSoundId, setSelectedSoundId] = useState<string | null>(null);
+  const [hoveredSoundId, setHoveredSoundId] = useState<string | null>(null);
   const [isPointerLocked, setIsPointerLocked] = useState(false);
 
   // Keyboard active inputs tracker for smooth frame updates
@@ -250,6 +252,17 @@ export default function App() {
             z: s.z,
             isPlaying: s.isPlaying,
             volume: s.volume,
+            nodeShape: s.nodeShape,
+            nodeColor: s.nodeColor,
+            reverbWetness: s.reverbWetness !== undefined ? s.reverbWetness : 0.3,
+            reverbType: (s as any).reverbType !== undefined ? (s as any).reverbType : 'none',
+            delayEnabled: (s as any).delayEnabled !== undefined ? (s as any).delayEnabled : false,
+            delayTime: (s as any).delayTime !== undefined ? (s as any).delayTime : 0.3,
+            delayFeedback: (s as any).delayFeedback !== undefined ? (s as any).delayFeedback : 0.4,
+            filterType: (s as any).filterType !== undefined ? (s as any).filterType : 'none',
+            filterFrequency: (s as any).filterFrequency !== undefined ? (s as any).filterFrequency : 1000,
+            dopplerEnabled: (s as any).dopplerEnabled !== undefined ? (s as any).dopplerEnabled : false,
+            dopplerFactor: (s as any).dopplerFactor !== undefined ? (s as any).dopplerFactor : 1.0,
           }));
           setSounds(restored);
         } else {
@@ -442,6 +455,15 @@ export default function App() {
       z: spawnZ,
       isPlaying: true,
       volume: 0.8,
+      reverbType: 'none',
+      reverbWetness: 0.3,
+      delayEnabled: false,
+      delayTime: 0.3,
+      delayFeedback: 0.4,
+      filterType: 'none',
+      filterFrequency: 1000,
+      dopplerEnabled: false,
+      dopplerFactor: 1.0,
     };
 
     if (file) {
@@ -459,7 +481,16 @@ export default function App() {
           z: spawnZ,
           isPlaying: true,
           volume: 0.8,
-        }, arrayBuffer);
+          reverbType: 'none',
+          reverbWetness: 0.3,
+          delayEnabled: false,
+          delayTime: 0.3,
+          delayFeedback: 0.4,
+          filterType: 'none',
+          filterFrequency: 1000,
+          dopplerEnabled: false,
+          dopplerFactor: 1.0,
+        } as any, arrayBuffer);
 
         if (audioService.ctx) {
           // Decode a slice copy of the arrayBuffer since decodeAudioData consumes the buffer
@@ -533,9 +564,50 @@ export default function App() {
     lastMousePosRef.current = { x: e.clientX, y: e.clientY };
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent) => {
-    if (!isDraggingRef.current) return;
-    lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    if (isDraggingRef.current) {
+      lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    let closestId: string | null = null;
+    let closestD = 55;
+
+    sounds.forEach((sound) => {
+      const t = Date.now() / 1000;
+      const floatOffset = (0.5 + 0.5 * Math.sin(t * 1.5 + sound.id.charCodeAt(0))) * 0.12;
+      const volMultiplier = 0.3 + 1.7 * (sound.volume ?? 0.8);
+      
+      const pCenter = project({ x: sound.x, y: -0.1 + floatOffset, z: sound.z }, canvas.width, canvas.height, cameraRef.current);
+      const pLabel = project({ x: sound.x, y: -0.7 + floatOffset + 1.35, z: sound.z }, canvas.width, canvas.height, cameraRef.current);
+      const pBase = project({ x: sound.x, y: -0.7, z: sound.z }, canvas.width, canvas.height, cameraRef.current);
+      
+      const pList = [pCenter, pLabel, pBase].filter((p): p is { x: number; y: number; depth: number } => p !== null);
+      
+      pList.forEach((p) => {
+        const dx = mouseX - p.x;
+        const dy = mouseY - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        const baseRadius = 35 * volMultiplier;
+        const hitRadius = Math.max(35, Math.min(100, (baseRadius * 12) / p.depth));
+        
+        if (dist < hitRadius && dist < closestD) {
+          closestD = dist;
+          closestId = sound.id;
+        }
+      });
+    });
+
+    if (closestId !== hoveredSoundId) {
+      setHoveredSoundId(closestId);
+    }
   };
 
   const handleCanvasMouseUp = () => {
@@ -561,6 +633,40 @@ export default function App() {
       document.removeEventListener('mousemove', handleMouseMoveWhenLocked);
     };
   }, []);
+  
+  // Mouse Wheel direct volume adjustment on hovered sound node
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (hoveredSoundId) {
+        // Prevent default browser scrolling when adjusting volume
+        e.preventDefault();
+        
+        setSounds((prev) =>
+          prev.map((s) => {
+            if (s.id === hoveredSoundId) {
+              const delta = e.deltaY < 0 ? 0.05 : -0.05;
+              const nextVolume = Math.max(0, Math.min(1.0, s.volume + delta));
+              
+              // Persist volume metadata change if uploaded sound
+              if (s.type === 'uploaded') {
+                updateSoundMetadata(s.id, { volume: nextVolume });
+              }
+              return { ...s, volume: nextVolume };
+            }
+            return s;
+          })
+        );
+      }
+    };
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+    };
+  }, [hoveredSoundId]);
 
   // Touch drag orbiting for mobile screens
   const handleCanvasTouchStart = (e: React.TouchEvent) => {
@@ -587,22 +693,41 @@ export default function App() {
 
     // Detect if we clicked on any sound cube 2D projection
     let clickedId: string | null = null;
-    let closestDist = 45; // max click radius in pixels
+    let closestDist = 55;
 
     sounds.forEach((sound) => {
-      const projection = project({ x: sound.x, y: 0.2, z: sound.z }, canvas.width, canvas.height, cameraRef.current);
-      if (projection) {
-        const dx = clickX - projection.x;
-        const dy = clickY - projection.y;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d < closestDist) {
-          closestDist = d;
+      const t = Date.now() / 1000;
+      const floatOffset = (0.5 + 0.5 * Math.sin(t * 1.5 + sound.id.charCodeAt(0))) * 0.12;
+      const volMultiplier = 0.3 + 1.7 * (sound.volume ?? 0.8);
+      
+      const pCenter = project({ x: sound.x, y: -0.1 + floatOffset, z: sound.z }, canvas.width, canvas.height, cameraRef.current);
+      const pLabel = project({ x: sound.x, y: -0.7 + floatOffset + 1.35, z: sound.z }, canvas.width, canvas.height, cameraRef.current);
+      const pBase = project({ x: sound.x, y: -0.7, z: sound.z }, canvas.width, canvas.height, cameraRef.current);
+      
+      const pList = [pCenter, pLabel, pBase].filter((p): p is { x: number; y: number; depth: number } => p !== null);
+      
+      pList.forEach((p) => {
+        const dx = clickX - p.x;
+        const dy = clickY - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        const baseRadius = 35 * volMultiplier;
+        const hitRadius = Math.max(35, Math.min(100, (baseRadius * 12) / p.depth));
+        
+        if (dist < hitRadius && dist < closestDist) {
+          closestDist = dist;
           clickedId = sound.id;
         }
-      }
+      });
     });
 
     setSelectedSoundId(clickedId);
+  };
+
+  const handleSliderKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+    }
   };
 
   // Core Projection function: projects world 3D coordinate to screen 2D coordinate
@@ -1072,6 +1197,7 @@ export default function App() {
         const amplitude = audioService.getAmplitude(sound.id);
         const ampFactor = sound.isPlaying ? (amplitude / 255) : 0;
         const isSelected = selectedSoundId === sound.id;
+        const isHovered = hoveredSoundId === sound.id;
 
         const t = Date.now() / 1000;
         // Float the entire element slowly to indicate spatial hovering
@@ -1081,22 +1207,28 @@ export default function App() {
         let rgb = '87, 126, 137'; // Smalt Blue default (North)
         let hexColor = '#577E89';
         
-        if (sound.soundType === 'north') {
-          rgb = '87, 126, 137'; // Smalt Blue
-          hexColor = '#577E89';
-        } else if (sound.soundType === 'east') {
-          rgb = '222, 196, 132'; // Calico
-          hexColor = '#DEC484';
-        } else if (sound.soundType === 'south') {
-          rgb = '225, 163, 111'; // Harvest Gold
-          hexColor = '#E1A36F';
-        } else if (sound.soundType === 'west') {
-          rgb = '111, 159, 156'; // Sea Nymph
-          hexColor = '#6F9F9C';
+        if (sound.nodeColor) {
+          const parsed = parseHex(sound.nodeColor);
+          rgb = `${parsed.r}, ${parsed.g}, ${parsed.b}`;
+          hexColor = sound.nodeColor;
         } else {
-          // Custom uploaded file - Soft Sage / Hampton inspired grey-cream
-          rgb = '226, 216, 165';
-          hexColor = '#E2D8A5';
+          if (sound.soundType === 'north') {
+            rgb = '87, 126, 137'; // Smalt Blue
+            hexColor = '#577E89';
+          } else if (sound.soundType === 'east') {
+            rgb = '222, 196, 132'; // Calico
+            hexColor = '#DEC484';
+          } else if (sound.soundType === 'south') {
+            rgb = '225, 163, 111'; // Harvest Gold
+            hexColor = '#E1A36F';
+          } else if (sound.soundType === 'west') {
+            rgb = '111, 159, 156'; // Sea Nymph
+            hexColor = '#6F9F9C';
+          } else {
+            // Custom uploaded file - Soft Sage / Hampton inspired grey-cream
+            rgb = '226, 216, 165';
+            hexColor = '#E2D8A5';
+          }
         }
 
         if (!sound.isPlaying) {
@@ -1140,6 +1272,11 @@ export default function App() {
         renderBoundaryCircle(1.1, `rgba(${rgb}, 0.08)`, true);
         renderBoundaryCircle(2.2, `rgba(${rgb}, 0.03)`, true);
 
+        // Point 3: Direct volume feedback ground ring (Grows and shrinks directly with node's volume!)
+        if (isSelected || isHovered) {
+          renderBoundaryCircle(sound.volume * 2.2, `rgba(${rgb}, 0.28)`, false);
+        }
+
         // Core central anchor point on the ground (indicating absolute coordinate position)
         const shadowP = project({ x: sound.x, y: -0.7, z: sound.z }, width, height, cameraRef.current);
         if (shadowP) {
@@ -1153,64 +1290,341 @@ export default function App() {
           ctx.fill();
         }
 
-        // Draw fluffy sound nodes with Simple Harmonic Longitudinal Wave motion (Flipping Physics inspired)
-        const numParticles = 32;
-        for (let pIdx = 0; pIdx < numParticles; pIdx++) {
-          // Distribute heights uniformly
-          const h = pIdx / numParticles;
-          // Golden ratio angle spiral distribution for perfect uniform spacing
-          const theta = pIdx * 137.5 * Math.PI / 180;
+        // Point 4: Glowing spatial sound beams and distance wave pulse particles flowing from each playing sound node to the camera's location
+        if (sound.isPlaying) {
+          const startPt = project({ x: sound.x, y: -0.1 + floatOffset, z: sound.z }, width, height, cameraRef.current);
+          const endPt = project({ x: cameraRef.current.x, y: -0.4, z: cameraRef.current.z }, width, height, cameraRef.current);
           
-          // Outer radius of the cloud (fluffy boundary)
-          const baseRadius = 0.12 + 0.45 * Math.sqrt(h);
-          
-          // Longitudinal wave oscillation: particles slide along their radial lines
-          // This creates compression bands and rarefaction bands propagating outward!
-          const waveFreq = sound.isPlaying ? (6.0 + 4.0 * ampFactor) : 2.5;
-          const waveAmpl = 0.04 + 0.12 * ampFactor;
-          const radialDisp = Math.sin(t * waveFreq - baseRadius * 11.0 + h * Math.PI * 1.5) * waveAmpl;
-
-          const partRadius = baseRadius + radialDisp;
-          const partX = sound.x + Math.cos(theta) * partRadius;
-          const partY = -0.5 + floatOffset + h * 0.95; // cloud height from -0.5 to 0.45
-          const partZ = sound.z + Math.sin(theta) * partRadius;
-
-          const pt = project({ x: partX, y: partY, z: partZ }, width, height, cameraRef.current);
-          if (pt) {
-            // Draw a delicate spring vector connecting line from the vertical central core axis
-            const axisP = project({ x: sound.x, y: partY, z: sound.z }, width, height, cameraRef.current);
-            if (axisP) {
-              ctx.strokeStyle = `rgba(${rgb}, ${0.06 + 0.12 * ampFactor})`;
-              ctx.lineWidth = 0.5;
-              ctx.beginPath();
-              ctx.moveTo(axisP.x, axisP.y);
-              ctx.lineTo(pt.x, pt.y);
-              ctx.stroke();
-            }
-
-            // Draw a very fluffy radial gradient cloudlet
-            const sizeMultiplier = sound.isPlaying ? (15 + 22 * ampFactor) : 8;
-            const sizeOsc = Math.sin(t * 3 + pIdx) * 2;
-            const pRadius = Math.max(3, (sizeMultiplier + sizeOsc) / pt.depth);
-
-            const grad = ctx.createRadialGradient(pt.x, pt.y, 1, pt.x, pt.y, pRadius);
-            const coreAlpha = isSelected ? (0.45 + 0.35 * ampFactor) : (0.28 + 0.22 * ampFactor);
-            grad.addColorStop(0, `rgba(${rgb}, ${coreAlpha})`);
-            grad.addColorStop(0.35, `rgba(${rgb}, ${coreAlpha * 0.35})`);
-            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-
-            ctx.fillStyle = grad;
+          if (startPt && endPt) {
+            ctx.strokeStyle = `rgba(${rgb}, ${isSelected ? 0.22 : 0.12})`;
+            ctx.lineWidth = isSelected ? 1.5 : 0.8;
+            ctx.setLineDash([4, 6]);
             ctx.beginPath();
-            ctx.arc(pt.x, pt.y, pRadius, 0, Math.PI * 2);
+            ctx.moveTo(startPt.x, startPt.y);
+            ctx.lineTo(endPt.x, endPt.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Render energy wave pulse particles flowing along the beam from the sound source to the camera
+            const numWaves = 3;
+            for (let wIdx = 0; wIdx < numWaves; wIdx++) {
+              const progress = ((t * 0.45 + wIdx / numWaves) % 1.0); // 0 = at source, 1 = at camera
+              const waveX = sound.x + (cameraRef.current.x - sound.x) * progress;
+              const waveY = (-0.1 + floatOffset) + (-0.4 - (-0.1 + floatOffset)) * progress;
+              const waveZ = sound.z + (cameraRef.current.z - sound.z) * progress;
+              
+              const waveP = project({ x: waveX, y: waveY, z: waveZ }, width, height, cameraRef.current);
+              if (waveP) {
+                const pulseSize = Math.max(1.8, (2.5 + 4.5 * ampFactor) / waveP.depth);
+                ctx.fillStyle = `rgba(${rgb}, ${(1.0 - progress) * (isSelected ? 0.75 : 0.45)})`;
+                ctx.beginPath();
+                ctx.arc(waveP.x, waveP.y, pulseSize, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          }
+        }
+
+        // Point 1: 3D Node Shape wireframe drawings (rotating, scaling with ampFactor)
+        const drawWireframeEdges = (vertices: { x: number; y: number; z: number }[], edges: [number, number][]) => {
+          const rotSpeed = 0.45;
+          const rotY = t * rotSpeed + sound.id.charCodeAt(0);
+          const rotPitch = t * 0.15;
+
+          const projPts = vertices.map(v => {
+            // 1. Rotate around Y (yaw)
+            const cosY = Math.cos(rotY);
+            const sinY = Math.sin(rotY);
+            const rx = v.x * cosY - v.z * sinY;
+            const rz = v.x * sinY + v.z * cosY;
+            
+            // 2. Rotate around X (pitch)
+            const cosX = Math.cos(rotPitch);
+            const sinX = Math.sin(rotPitch);
+            const ry = v.y * cosX - rz * sinX;
+            const rzFinal = v.y * sinX + rz * cosX;
+            
+            // 3. Project in world space
+            return project({
+              x: sound.x + rx,
+              y: -0.1 + floatOffset + ry,
+              z: sound.z + rzFinal
+            }, width, height, cameraRef.current);
+          });
+          
+          if (projPts.some(p => p === null)) return;
+          
+          ctx.strokeStyle = `rgba(${rgb}, ${isSelected || isHovered ? 0.95 : 0.6})`;
+          ctx.lineWidth = isSelected ? 2.2 : isHovered ? 1.8 : 1.2;
+          
+          edges.forEach(([i, j]) => {
+            ctx.beginPath();
+            ctx.moveTo(projPts[i]!.x, projPts[i]!.y);
+            ctx.lineTo(projPts[j]!.x, projPts[j]!.y);
+            ctx.stroke();
+          });
+          
+          // Draw small glowing vertex dots
+          ctx.fillStyle = `rgba(${rgb}, ${isSelected || isHovered ? 1.0 : 0.85})`;
+          projPts.forEach((p) => {
+            ctx.beginPath();
+            ctx.arc(p!.x, p!.y, isSelected ? 3.0 : isHovered ? 2.5 : 1.8, 0, Math.PI * 2);
             ctx.fill();
+          });
+        };
+
+        const volMultiplier = 0.3 + 1.7 * (sound.volume ?? 0.8);
+        const shape = sound.nodeShape || 'sphere';
+
+        if (shape === 'cube') {
+          const s = (0.25 + 0.08 * ampFactor) * volMultiplier;
+          const vertices = [
+            { x: -s, y: -s, z: -s },
+            { x: s, y: -s, z: -s },
+            { x: s, y: s, z: -s },
+            { x: -s, y: s, z: -s },
+            { x: -s, y: -s, z: s },
+            { x: s, y: -s, z: s },
+            { x: s, y: s, z: s },
+            { x: -s, y: s, z: s },
+          ];
+          const edges: [number, number][] = [
+            [0, 1], [1, 2], [2, 3], [3, 0], // front
+            [4, 5], [5, 6], [6, 7], [7, 4], // back
+            [0, 4], [1, 5], [2, 6], [3, 7], // cross links
+          ];
+          drawWireframeEdges(vertices, edges);
+        } else if (shape === 'pyramid') {
+          const w = (0.28 + 0.08 * ampFactor) * volMultiplier;
+          const h = (0.38 + 0.12 * ampFactor) * volMultiplier;
+          const vertices = [
+            { x: 0, y: h/2, z: 0 }, // apex
+            { x: -w, y: -h/2, z: -w },
+            { x: w, y: -h/2, z: -w },
+            { x: w, y: -h/2, z: w },
+            { x: -w, y: -h/2, z: w },
+          ];
+          const edges: [number, number][] = [
+            [0, 1], [0, 2], [0, 3], [0, 4],
+            [1, 2], [2, 3], [3, 4], [4, 1],
+          ];
+          drawWireframeEdges(vertices, edges);
+        } else if (shape === 'torus') {
+          const rRing = (0.26 + 0.08 * ampFactor) * volMultiplier;
+          const rTube = 0.09 * volMultiplier;
+          const vertices: { x: number; y: number; z: number }[] = [];
+          const edges: [number, number][] = [];
+          
+          const ringSegs = 8;
+          const tubeSegs = 6;
+          for (let i = 0; i < ringSegs; i++) {
+            const phi = (i / ringSegs) * Math.PI * 2;
+            const cosPhi = Math.cos(phi);
+            const sinPhi = Math.sin(phi);
+            for (let j = 0; j < tubeSegs; j++) {
+              const theta = (j / tubeSegs) * Math.PI * 2;
+              const cosTheta = Math.cos(theta);
+              const sinTheta = Math.sin(theta);
+              
+              const x = (rRing + rTube * cosTheta) * cosPhi;
+              const y = rTube * sinTheta;
+              const z = (rRing + rTube * cosTheta) * sinPhi;
+              vertices.push({ x, y, z });
+              
+              const cur = i * tubeSegs + j;
+              edges.push([cur, i * tubeSegs + ((j + 1) % tubeSegs)]);
+              edges.push([cur, ((i + 1) % ringSegs) * tubeSegs + j]);
+            }
+          }
+          drawWireframeEdges(vertices, edges);
+        } else if (shape === 'cylinder') {
+          const r = (0.24 + 0.08 * ampFactor) * volMultiplier;
+          const h = (0.3 + 0.1 * ampFactor) * volMultiplier;
+          const vertices: { x: number; y: number; z: number }[] = [];
+          const edges: [number, number][] = [];
+          
+          const segs = 8;
+          for (let i = 0; i < segs; i++) {
+            const theta = (i / segs) * Math.PI * 2;
+            vertices.push({ x: r * Math.cos(theta), y: -h, z: r * Math.sin(theta) });
+            edges.push([i, (i + 1) % segs]);
+          }
+          for (let i = 0; i < segs; i++) {
+            const theta = (i / segs) * Math.PI * 2;
+            vertices.push({ x: r * Math.cos(theta), y: h, z: r * Math.sin(theta) });
+            edges.push([segs + i, segs + ((i + 1) % segs)]);
+            edges.push([i, segs + i]);
+          }
+          drawWireframeEdges(vertices, edges);
+        } else {
+          // 'sphere' (Equator, Meridian, and cross-meridian rings + particles)
+          const r = (0.3 + 0.1 * ampFactor) * volMultiplier;
+          const vertices: { x: number; y: number; z: number }[] = [];
+          const edges: [number, number][] = [];
+          
+          const latSegs = 5;
+          const lonSegs = 8;
+          for (let i = 1; i < latSegs; i++) {
+            const theta = (i / latSegs) * Math.PI;
+            const sinTheta = Math.sin(theta);
+            const cosTheta = Math.cos(theta);
+            for (let j = 0; j < lonSegs; j++) {
+              const phi = (j / lonSegs) * Math.PI * 2;
+              vertices.push({
+                x: r * sinTheta * Math.cos(phi),
+                y: r * cosTheta,
+                z: r * sinTheta * Math.sin(phi),
+              });
+              const cur = (i - 1) * lonSegs + j;
+              edges.push([cur, (i - 1) * lonSegs + ((j + 1) % lonSegs)]);
+              if (i < latSegs - 1) {
+                edges.push([cur, i * lonSegs + j]);
+              }
+            }
+          }
+          
+          const topIdx = vertices.length;
+          vertices.push({ x: 0, y: r, z: 0 });
+          const botIdx = vertices.length;
+          vertices.push({ x: 0, y: -r, z: 0 });
+          for (let j = 0; j < lonSegs; j++) {
+            edges.push([topIdx, j]);
+            edges.push([botIdx, (latSegs - 2) * lonSegs + j]);
+          }
+          drawWireframeEdges(vertices, edges);
+          
+          // Render overlapping cloudlets for a dual high-fidelity depth appearance
+          const numParticles = 16;
+          for (let pIdx = 0; pIdx < numParticles; pIdx++) {
+            const h = pIdx / numParticles;
+            const theta = pIdx * 137.5 * Math.PI / 180;
+            const baseRadius = (0.12 + 0.35 * Math.sqrt(h)) * volMultiplier;
+            const waveFreq = sound.isPlaying ? (6.0 + 4.0 * ampFactor) : 2.5;
+            const waveAmpl = (0.04 + 0.12 * ampFactor) * volMultiplier;
+            const radialDisp = Math.sin(t * waveFreq - (baseRadius / volMultiplier) * 11.0 + h * Math.PI * 1.5) * waveAmpl;
+
+            const partRadius = baseRadius + radialDisp;
+            const partX = sound.x + Math.cos(theta) * partRadius;
+            const partY = -0.1 + floatOffset + (h * 0.4 - 0.2) * volMultiplier;
+            const partZ = sound.z + Math.sin(theta) * partRadius;
+
+            const pt = project({ x: partX, y: partY, z: partZ }, width, height, cameraRef.current);
+            if (pt) {
+              const pRadius = Math.max(2, (6 + 10 * ampFactor) / pt.depth);
+              const grad = ctx.createRadialGradient(pt.x, pt.y, 1, pt.x, pt.y, pRadius);
+              const coreAlpha = isSelected ? 0.28 : 0.15;
+              grad.addColorStop(0, `rgba(${rgb}, ${coreAlpha})`);
+              grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+              ctx.fillStyle = grad;
+              ctx.beginPath();
+              ctx.arc(pt.x, pt.y, pRadius, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+
+        // --- CREATIVE ACOUSTIC EFFECTS ANIMATIONS ---
+        if (sound.isPlaying) {
+          // 1. Reverb concentric ground wave ripples
+          if (sound.reverbType && sound.reverbType !== 'none') {
+            const isLong = sound.reverbType === 'long';
+            const reverbFactor = sound.reverbWetness ?? 0.3;
+            const speed = isLong ? 0.6 : 1.2;
+            const rippleCount = isLong ? 4 : 3;
+            
+            for (let rIdx = 0; rIdx < rippleCount; rIdx++) {
+              const rippleProgress = ((t * speed + rIdx / rippleCount) % 1.0);
+              const rippleRadius = (0.25 + rippleProgress * (isLong ? 3.5 : 1.8)) * volMultiplier;
+              const rippleAlpha = (1.0 - rippleProgress) * reverbFactor * 0.45;
+              renderBoundaryCircle(rippleRadius, `rgba(${rgb}, ${rippleAlpha})`, false);
+            }
+          }
+
+          // 2. Delay Echo 3D winding helix coils
+          if (sound.delayEnabled) {
+            const delayTimeVal = sound.delayTime ?? 0.3;
+            const delayFbVal = sound.delayFeedback ?? 0.4;
+            const helixVertices: { x: number; y: number; z: number }[] = [];
+            const helixEdges: [number, number][] = [];
+            
+            const helixSegs = 24;
+            const turns = 2.5 + 2.0 * delayFbVal;
+            const helixRadius = (0.42 + 0.1 * Math.sin(t * 3.5)) * volMultiplier;
+            const helixHeight = 0.75 * volMultiplier;
+            
+            for (let i = 0; i <= helixSegs; i++) {
+              const theta = (i / helixSegs) * Math.PI * 2 * turns + t * (2.2 / delayTimeVal);
+              const hFraction = i / helixSegs;
+              const hX = Math.cos(theta) * helixRadius;
+              const hY = -helixHeight / 2 + hFraction * helixHeight;
+              const hZ = Math.sin(theta) * helixRadius;
+              helixVertices.push({ x: hX, y: hY, z: hZ });
+              if (i > 0) {
+                helixEdges.push([i - 1, i]);
+              }
+            }
+            drawWireframeEdges(helixVertices, helixEdges);
+          }
+
+          // 3. Filter EQ cutoff shields and air halos
+          if (sound.filterType && sound.filterType !== 'none') {
+            const isLowpass = sound.filterType === 'lowpass';
+            const filterRadius = (0.52 + 0.08 * Math.cos(t * 6.0)) * volMultiplier;
+            const ringY = isLowpass ? (-0.32 * volMultiplier) : (0.32 * volMultiplier);
+            const ringVertices: { x: number; y: number; z: number }[] = [];
+            const ringEdges: [number, number][] = [];
+            
+            const segs = 16;
+            for (let i = 0; i < segs; i++) {
+              const angle = (i / segs) * Math.PI * 2 + (isLowpass ? 0 : t * 2.5);
+              ringVertices.push({
+                x: Math.cos(angle) * filterRadius,
+                y: ringY + (isLowpass ? 0 : Math.sin(t * 8 + i) * 0.03 * volMultiplier),
+                z: Math.sin(angle) * filterRadius
+              });
+              ringEdges.push([i, (i + 1) % segs]);
+            }
+            drawWireframeEdges(ringVertices, ringEdges);
+            
+            if (isLowpass) {
+              const plateCrossEdges: [number, number][] = [
+                [0, 8], [4, 12]
+              ];
+              drawWireframeEdges(ringVertices, plateCrossEdges);
+            }
+          }
+
+          // 4. Doppler high-vibrancy wavy sonic propeller
+          if (sound.dopplerEnabled) {
+            const dopFactor = sound.dopplerFactor ?? 1.0;
+            const dopVertices: { x: number; y: number; z: number }[] = [];
+            const dopEdges: [number, number][] = [];
+            
+            const numPts = 20;
+            const radius = 0.48 * volMultiplier;
+            for (let i = 0; i < numPts; i++) {
+              const angle = (i / numPts) * Math.PI * 2;
+              const wave = Math.sin(angle * 5.0 + t * 14.0 * dopFactor) * 0.07 * volMultiplier;
+              dopVertices.push({
+                x: Math.cos(angle) * (radius + wave),
+                y: Math.sin(t * 5.0) * 0.08 * volMultiplier,
+                z: Math.sin(angle) * (radius + wave)
+              });
+              dopEdges.push([i, (i + 1) % numPts]);
+            }
+            drawWireframeEdges(dopVertices, dopEdges);
           }
         }
 
         // Float a human readable monospace tag above the liquid visualizer
-        const labelHeight = 1.3;
+        const labelHeight = 1.35;
         const labelP = project({ x: sound.x, y: -0.7 + floatOffset + labelHeight, z: sound.z }, width, height, cameraRef.current);
         if (labelP) {
-          const labelText = sound.name;
+          // If hovered or selected, render volume popup or direct volume tag
+          const labelText = isHovered 
+            ? `${sound.name} (VOL: ${Math.round(sound.volume * 100)}%)`
+            : sound.name;
+            
           ctx.font = 'bold 9px monospace';
           const textWidth = ctx.measureText(labelText).width;
           
@@ -1651,6 +2065,252 @@ export default function App() {
                       <span className={`font-semibold ${s.isPlaying ? 'text-green-600' : 'text-zinc-400'}`}>
                         {s.isPlaying ? 'ACTIVE LOOP' : 'PAUSED'}
                       </span>
+                    </div>
+                  </div>
+
+                  {/* Point 3: Direct Node Volume Adjuster Slider */}
+                  <div className="flex flex-col gap-1.5 p-1 border border-zinc-100 rounded-lg bg-zinc-50/50">
+                    <div className="flex justify-between items-center text-[9px] font-bold text-zinc-400 font-mono uppercase tracking-wider">
+                      <span>Volume ({Math.round(s.volume * 100)}%)</span>
+                      <span className="text-zinc-400 font-medium">Scroll node to tune</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <VolumeX className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={s.volume}
+                        onChange={(e) => handleUpdateSound(s.id, { volume: parseFloat(e.target.value) })}
+                        onKeyDown={handleSliderKeyDown}
+                        className="flex-1 accent-zinc-950 h-1 bg-zinc-200 rounded-lg cursor-pointer appearance-none"
+                      />
+                      <Volume2 className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
+                    </div>
+                  </div>
+
+                  {/* Per-Node Acoustics & Effects Panel */}
+                  <div className="border-t border-zinc-150 pt-2.5 space-y-2">
+                    <p className="text-[10px] font-bold text-zinc-400 font-mono uppercase tracking-wider">
+                      Node Acoustic Effects
+                    </p>
+
+                    {/* 1. Reverb Config */}
+                    <div className="p-1.5 rounded-lg border border-zinc-100 bg-zinc-50/60 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-mono font-bold text-zinc-600 uppercase">Space Reverb</span>
+                        <select
+                          value={s.reverbType || 'none'}
+                          onChange={(e) => handleUpdateSound(s.id, { reverbType: e.target.value as any })}
+                          className="text-[9px] font-mono bg-white border border-zinc-200 rounded-md px-1.5 py-0.5 focus:outline-hidden font-bold cursor-pointer"
+                        >
+                          <option value="none">None (Dry)</option>
+                          <option value="short">Short Reverb</option>
+                          <option value="long">Long Reverb</option>
+                        </select>
+                      </div>
+                      {s.reverbType && s.reverbType !== 'none' && (
+                        <div className="space-y-1 pl-1">
+                          <div className="flex justify-between text-[8px] font-mono text-zinc-400">
+                            <span>Wetness</span>
+                            <span>{Math.round((s.reverbWetness !== undefined ? s.reverbWetness : 0.3) * 100)}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            value={s.reverbWetness !== undefined ? s.reverbWetness : 0.3}
+                            onChange={(e) => handleUpdateSound(s.id, { reverbWetness: parseFloat(e.target.value) })}
+                            onKeyDown={handleSliderKeyDown}
+                            className="w-full accent-zinc-950 h-1 bg-zinc-200 rounded-lg cursor-pointer appearance-none"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 2. Echo / Delay Config */}
+                    <div className="p-1.5 rounded-lg border border-zinc-100 bg-zinc-50/60 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-mono font-bold text-zinc-600 uppercase">Echo Loop (Delay)</span>
+                        <input
+                          type="checkbox"
+                          checked={!!s.delayEnabled}
+                          onChange={(e) => handleUpdateSound(s.id, { delayEnabled: e.target.checked })}
+                          className="w-3.5 h-3.5 rounded border-zinc-300 text-zinc-950 focus:ring-zinc-950 cursor-pointer"
+                        />
+                      </div>
+                      {s.delayEnabled && (
+                        <div className="space-y-1.5 pl-1">
+                          <div className="space-y-0.5">
+                            <div className="flex justify-between text-[8px] font-mono text-zinc-400">
+                              <span>Delay Time</span>
+                              <span>{(s.delayTime !== undefined ? s.delayTime : 0.3).toFixed(1)}s</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.1"
+                              max="1.0"
+                              step="0.05"
+                              value={s.delayTime !== undefined ? s.delayTime : 0.3}
+                              onChange={(e) => handleUpdateSound(s.id, { delayTime: parseFloat(e.target.value) })}
+                              onKeyDown={handleSliderKeyDown}
+                              className="w-full accent-zinc-950 h-1 bg-zinc-200 rounded-lg cursor-pointer appearance-none"
+                            />
+                          </div>
+                          <div className="space-y-0.5">
+                            <div className="flex justify-between text-[8px] font-mono text-zinc-400">
+                              <span>Feedback</span>
+                              <span>{Math.round((s.delayFeedback !== undefined ? s.delayFeedback : 0.4) * 100)}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.0"
+                              max="0.9"
+                              step="0.05"
+                              value={s.delayFeedback !== undefined ? s.delayFeedback : 0.4}
+                              onChange={(e) => handleUpdateSound(s.id, { delayFeedback: parseFloat(e.target.value) })}
+                              onKeyDown={handleSliderKeyDown}
+                              className="w-full accent-zinc-950 h-1 bg-zinc-200 rounded-lg cursor-pointer appearance-none"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 3. Filter EQ Config */}
+                    <div className="p-1.5 rounded-lg border border-zinc-100 bg-zinc-50/60 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-mono font-bold text-zinc-600 uppercase">Filter EQ</span>
+                        <select
+                          value={s.filterType || 'none'}
+                          onChange={(e) => handleUpdateSound(s.id, { filterType: e.target.value as any })}
+                          className="text-[9px] font-mono bg-white border border-zinc-200 rounded-md px-1.5 py-0.5 focus:outline-hidden font-bold cursor-pointer"
+                        >
+                          <option value="none">Bypass</option>
+                          <option value="lowpass">Low-Pass</option>
+                          <option value="highpass">High-Pass</option>
+                        </select>
+                      </div>
+                      {s.filterType && s.filterType !== 'none' && (
+                        <div className="space-y-1 pl-1">
+                          <div className="flex justify-between text-[8px] font-mono text-zinc-400">
+                            <span>Frequency</span>
+                            <span>{s.filterFrequency !== undefined ? s.filterFrequency : 1000} Hz</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="100"
+                            max="6000"
+                            step="50"
+                            value={s.filterFrequency !== undefined ? s.filterFrequency : 1000}
+                            onChange={(e) => handleUpdateSound(s.id, { filterFrequency: parseInt(e.target.value) })}
+                            onKeyDown={handleSliderKeyDown}
+                            className="w-full accent-zinc-950 h-1 bg-zinc-200 rounded-lg cursor-pointer appearance-none"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 4. Doppler Pitch Shifter Config */}
+                    <div className="p-1.5 rounded-lg border border-zinc-100 bg-zinc-50/60 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-mono font-bold text-zinc-600 uppercase">Doppler (Motion Pitch)</span>
+                        <input
+                          type="checkbox"
+                          checked={!!s.dopplerEnabled}
+                          onChange={(e) => handleUpdateSound(s.id, { dopplerEnabled: e.target.checked })}
+                          className="w-3.5 h-3.5 rounded border-zinc-300 text-zinc-950 focus:ring-zinc-950 cursor-pointer"
+                        />
+                      </div>
+                      {s.dopplerEnabled && (
+                        <div className="space-y-1 pl-1">
+                          <div className="flex justify-between text-[8px] font-mono text-zinc-400">
+                            <span>Pitch Intensity</span>
+                            <span>{(s.dopplerFactor !== undefined ? s.dopplerFactor : 1.0).toFixed(1)}x</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.1"
+                            max="5.0"
+                            step="0.1"
+                            value={s.dopplerFactor !== undefined ? s.dopplerFactor : 1.0}
+                            onChange={(e) => handleUpdateSound(s.id, { dopplerFactor: parseFloat(e.target.value) })}
+                            onKeyDown={handleSliderKeyDown}
+                            className="w-full accent-zinc-950 h-1 bg-zinc-200 rounded-lg cursor-pointer appearance-none"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Point 1: 3D Node Shape Picker */}
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-[9px] font-bold text-zinc-400 font-mono uppercase tracking-wider">
+                      3D Node Shape
+                    </p>
+                    <div className="grid grid-cols-5 gap-1">
+                      {(['sphere', 'cube', 'pyramid', 'torus', 'cylinder'] as const).map((shape) => (
+                        <button
+                          key={shape}
+                          onClick={() => handleUpdateSound(s.id, { nodeShape: shape })}
+                          className={`py-1 rounded-md text-[9px] font-mono border transition-all cursor-pointer capitalize text-center leading-none ${
+                            (s.nodeShape || 'sphere') === shape
+                              ? 'bg-zinc-950 text-white border-zinc-950 shadow-xs font-bold'
+                              : 'bg-zinc-50 hover:bg-zinc-100 text-zinc-600 border-zinc-200'
+                          }`}
+                          title={`Set shape to ${shape}`}
+                        >
+                          {shape.substring(0, 4)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Point 1: Aura Color Accent Selector */}
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-[9px] font-bold text-zinc-400 font-mono uppercase tracking-wider">
+                      Aura Color Accent
+                    </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {[
+                        { value: '#577E89', name: 'Smalt Blue' },
+                        { value: '#DEC484', name: 'Calico' },
+                        { value: '#E1A36F', name: 'Harvest' },
+                        { value: '#6F9F9C', name: 'Nymph' },
+                        { value: '#E2D8A5', name: 'Hampton' },
+                        { value: '#EC4899', name: 'Hot Pink' },
+                        { value: '#8B5CF6', name: 'Purple' },
+                        { value: '#10B981', name: 'Emerald' }
+                      ].map((colorOpt) => (
+                        <button
+                          key={colorOpt.value}
+                          onClick={() => handleUpdateSound(s.id, { nodeColor: colorOpt.value })}
+                          className={`w-5.5 h-5.5 rounded-full border transition-all cursor-pointer flex items-center justify-center relative ${
+                            s.nodeColor === colorOpt.value || (!s.nodeColor && colorOpt.value === (s.soundType === 'north' ? '#577E89' : s.soundType === 'east' ? '#DEC484' : s.soundType === 'south' ? '#E1A36F' : s.soundType === 'west' ? '#6F9F9C' : '#E2D8A5'))
+                              ? 'scale-110 ring-2 ring-zinc-950 ring-offset-1 border-transparent'
+                              : 'border-zinc-300 hover:scale-105'
+                          }`}
+                          style={{ backgroundColor: colorOpt.value }}
+                          title={colorOpt.name}
+                        >
+                          {(s.nodeColor === colorOpt.value || (!s.nodeColor && colorOpt.value === (s.soundType === 'north' ? '#577E89' : s.soundType === 'east' ? '#DEC484' : s.soundType === 'south' ? '#E1A36F' : s.soundType === 'west' ? '#6F9F9C' : '#E2D8A5'))) && (
+                            <Check className="w-3 h-3 text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)]" />
+                          )}
+                        </button>
+                      ))}
+                      
+                      {/* Native dynamic color wheel picker */}
+                      <div className="relative w-5.5 h-5.5 rounded-full border border-zinc-300 overflow-hidden cursor-pointer hover:scale-105 flex items-center justify-center bg-conic-rainbow" title="Custom color picker">
+                        <input
+                          type="color"
+                          value={s.nodeColor || '#577E89'}
+                          onChange={(e) => handleUpdateSound(s.id, { nodeColor: e.target.value })}
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        />
+                        <Sparkles className="w-3 h-3 text-zinc-500 pointer-events-none" />
+                      </div>
                     </div>
                   </div>
 

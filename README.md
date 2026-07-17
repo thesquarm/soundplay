@@ -1,20 +1,10 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# sound_play: Spatial Soundscape Designer
 
-# Run and deploy your AI Studio app
+sound_play is an interactive, browser-based 3D spatial soundscape designer that empowers users to sculpt immersive acoustic environments in real-time. By positioning procedural synthesizer nodes and custom audio uploads on a virtual spatial canvas, users can explore physical acoustic modeling such as room reverb, echo delays, and low/high-pass EQ filters. The platform incorporates native Doppler pitch-shifting which dynamically reacts to player movement, simulating realistic wave propagation. With high-fidelity binaural panning and an integrated multi-track performance recorder, it bridges the gap between spatial acoustic exploration and creative sound design. This makes it an ideal playground for musicians, sound engineers, and experiential creators alike.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/3b9dbf1d-558a-4503-ae24-1e6f8e676da6
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- **3D Spatial Acoustic Canvas**: Rendered in hardware-accelerated 2D perspective mapping, allowing direct drag-and-drop or WASD/joystick exploration.
+- **Per-Node Acoustics Dashboard**: Detailed controls on each active source for Short/Long Reverb, Loop Delay (Echo) time and feedback, EQ Filters, and Doppler speed scaling.
+- **Procedural and Custom Synthesis**: Features 4 built-in environmental sound generators alongside high-fidelity mic recording and direct audio file uploads.
+- **Session Performance Recorder**: Capture and export real-time binaural soundscape performances instantly.

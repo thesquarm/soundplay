@@ -26,6 +26,12 @@ export default function SoundList({
 }: SoundListProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const handleSliderKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+    }
+  };
+
   const [isRecordingMic, setIsRecordingMic] = useState(false);
   const [micSeconds, setMicSeconds] = useState(0);
   const [micError, setMicError] = useState<string | null>(null);
@@ -332,6 +338,7 @@ export default function SoundList({
                       step="0.05"
                       value={sound.volume}
                       onChange={(e) => onUpdateSound(sound.id, { volume: parseFloat(e.target.value) })}
+                      onKeyDown={handleSliderKeyDown}
                       className="w-full h-1 bg-zinc-100 rounded-lg appearance-none cursor-pointer accent-zinc-800"
                     />
                   </div>
@@ -342,41 +349,45 @@ export default function SoundList({
         )}
       </div>
 
-      {/* Add Sound Panel (Presets only!) */}
+      {/* Add Sound Panel (Synthesis Modules!) */}
       <div className="p-4 space-y-3 bg-zinc-50/50 border-t border-zinc-100">
         <h3 className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider font-mono">
-          Quick-Add World Presets
+          Quick-Add Acoustic Synthesizers
         </h3>
         
         {/* Presets Grid */}
         <div className="grid grid-cols-2 gap-1.5">
           <button
             id="add-north-btn"
-            onClick={() => onAddSound('north', 'Forest Birds')}
+            onClick={() => onAddSound('north', 'Chirping Canopy Synth')}
             className="flex flex-col items-center justify-center p-2 rounded-lg border border-zinc-200 hover:border-[#577E89] bg-[#577E89]/5 hover:bg-[#577E89]/10 transition-all cursor-pointer text-center"
           >
-            <span className="text-[9px] font-bold text-zinc-700">▲ North (Smalt Blue)</span>
+            <span className="text-[9px] font-bold text-[#577E89] uppercase tracking-wide">▲ Canopy Synth</span>
+            <span className="text-[8px] text-zinc-500 font-mono">Chirping forest</span>
           </button>
           <button
             id="add-east-btn"
-            onClick={() => onAddSound('east', 'Honeybees')}
+            onClick={() => onAddSound('east', 'Meadow Drone Oscillator')}
             className="flex flex-col items-center justify-center p-2 rounded-lg border border-zinc-200 hover:border-[#DEC484] bg-[#DEC484]/5 hover:bg-[#DEC484]/10 transition-all cursor-pointer text-center"
           >
-            <span className="text-[9px] font-bold text-zinc-700">▶ East (Calico)</span>
+            <span className="text-[9px] font-bold text-[#bfa360] uppercase tracking-wide">▶ Drone Oscillator</span>
+            <span className="text-[8px] text-zinc-500 font-mono">Meadow wildlife</span>
           </button>
           <button
             id="add-south-btn"
-            onClick={() => onAddSound('south', 'Rain & Thunder')}
+            onClick={() => onAddSound('south', 'Storm & Thunder Generative')}
             className="flex flex-col items-center justify-center p-2 rounded-lg border border-zinc-200 hover:border-[#E1A36F] bg-[#E1A36F]/5 hover:bg-[#E1A36F]/10 transition-all cursor-pointer text-center"
           >
-            <span className="text-[9px] font-bold text-zinc-700">▼ South (Harvest Gold)</span>
+            <span className="text-[9px] font-bold text-[#cc854e] uppercase tracking-wide">▼ Storm Gen</span>
+            <span className="text-[8px] text-zinc-500 font-mono">Atmospheric rain</span>
           </button>
           <button
             id="add-west-btn"
-            onClick={() => onAddSound('west', 'Hearing Resonance')}
+            onClick={() => onAddSound('west', 'Aura Resonator Drone')}
             className="flex flex-col items-center justify-center p-2 rounded-lg border border-zinc-200 hover:border-[#6F9F9C] bg-[#6F9F9C]/5 hover:bg-[#6F9F9C]/10 transition-all cursor-pointer text-center"
           >
-            <span className="text-[9px] font-bold text-zinc-700">◀ West (Sea Nymph)</span>
+            <span className="text-[9px] font-bold text-[#558582] uppercase tracking-wide">◀ Aura Resonator</span>
+            <span className="text-[8px] text-zinc-500 font-mono">Sine wave drone</span>
           </button>
         </div>
       </div>

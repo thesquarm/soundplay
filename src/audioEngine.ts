@@ -5,6 +5,9 @@ class AudioEngine {
   public ctx: AudioContext | null = null;
   public masterGain: GainNode | null = null;
   public recorderDestination: MediaStreamAudioDestinationNode | null = null;
+  
+  public shortReverbNode: ConvolverNode | null = null;
+  public longReverbNode: ConvolverNode | null = null;
 
   // Track sources: id -> active Web Audio nodes
   private activeNodes: Map<
@@ -12,8 +15,16 @@ class AudioEngine {
     {
       sourceNode: AudioNode;
       gainNode: GainNode;
+      filterNode: BiquadFilterNode;
       pannerNode: StereoPannerNode;
       analyserNode: AnalyserNode;
+      dryGainNode: GainNode;
+      wetGainNode: GainNode;
+      delayNode: DelayNode;
+      delayFeedbackNode: GainNode;
+      delayWetGainNode: GainNode;
+      prevDistance?: number;
+      smoothVelocity?: number;
       proceduralIntervals?: any[]; // For intervals/timeouts of procedural audio
     }
   > = new Map();
@@ -41,6 +52,19 @@ class AudioEngine {
     this.masterGain.gain.setValueAtTime(0.8, this.ctx.currentTime);
     this.masterGain.connect(this.ctx.destination);
 
+    // Reverb convolver node setups
+    try {
+      this.shortReverbNode = this.ctx.createConvolver();
+      this.shortReverbNode.buffer = this.createReverbImpulseResponse(1.2, 2.5, false);
+      this.shortReverbNode.connect(this.masterGain);
+
+      this.longReverbNode = this.ctx.createConvolver();
+      this.longReverbNode.buffer = this.createReverbImpulseResponse(3.8, 1.2, false);
+      this.longReverbNode.connect(this.masterGain);
+    } catch (e) {
+      console.error('Failed to initialize convolvers:', e);
+    }
+
     // Recording node helper (captures master output)
     this.recorderDestination = this.ctx.createMediaStreamDestination();
     this.masterGain.connect(this.recorderDestination);
@@ -52,6 +76,37 @@ class AudioEngine {
         this.ctx.resume().catch((err) => console.error("Failed to resume AudioContext:", err));
       }
     }
+  }
+
+  private createReverbImpulseResponse(duration: number, decay: number, isForest: boolean = false): AudioBuffer {
+    const sampleRate = this.ctx ? this.ctx.sampleRate : 44100;
+    const numSamples = Math.floor(sampleRate * duration);
+    const buffer = this.ctx!.createBuffer(2, numSamples, sampleRate);
+    
+    for (let channel = 0; channel < 2; channel++) {
+      const channelData = buffer.getChannelData(channel);
+      for (let i = 0; i < numSamples; i++) {
+        // White noise base
+        let noise = Math.random() * 2 - 1;
+        
+        // Exponential decay envelope
+        const t = i / sampleRate;
+        let envelope = Math.exp(-t * decay);
+        
+        // Forest Canopy: fluttering late reflections
+        if (isForest) {
+          const flutter = Math.sin(t * 80) * 0.35 + 0.65;
+          envelope *= flutter;
+          if (t > 0.05) {
+            const tap = Math.sin(t * 120 + channel * Math.PI) > 0.8 ? 0.3 : 0;
+            noise = (noise + tap) * 0.8;
+          }
+        }
+        
+        channelData[i] = noise * envelope;
+      }
+    }
+    return buffer;
   }
 
   // Pre-load an uploaded audio file buffer
@@ -75,15 +130,58 @@ class AudioEngine {
 
     // Create sound chain nodes
     const gainNode = this.ctx.createGain();
+    const filterNode = this.ctx.createBiquadFilter();
     const pannerNode = this.ctx.createStereoPanner();
     const analyserNode = this.ctx.createAnalyser();
     
     analyserNode.fftSize = 64; // Small fft for lightweight level analysis
 
-    // Gain node -> Panner -> Analyser -> Master Gain
-    gainNode.connect(pannerNode);
+    // Configure filter node: type 'allpass' is transparent bypass
+    const fType = sound.filterType && sound.filterType !== 'none' ? sound.filterType : 'allpass';
+    filterNode.type = fType;
+    filterNode.frequency.setValueAtTime(sound.filterFrequency !== undefined ? sound.filterFrequency : 1000, this.ctx.currentTime);
+
+    const dryGainNode = this.ctx.createGain();
+    const wetGainNode = this.ctx.createGain();
+
+    const wetness = sound.reverbWetness !== undefined ? sound.reverbWetness : 0.3;
+    dryGainNode.gain.setValueAtTime(1.0 - wetness * 0.5, this.ctx.currentTime);
+    wetGainNode.gain.setValueAtTime(wetness, this.ctx.currentTime);
+
+    // Echo / Delay loop nodes
+    const delayNode = this.ctx.createDelay(1.0);
+    const delayFeedbackNode = this.ctx.createGain();
+    const delayWetGainNode = this.ctx.createGain();
+
+    delayNode.delayTime.setValueAtTime(sound.delayTime !== undefined ? sound.delayTime : 0.3, this.ctx.currentTime);
+    delayFeedbackNode.gain.setValueAtTime(sound.delayFeedback !== undefined ? sound.delayFeedback : 0.4, this.ctx.currentTime);
+    delayWetGainNode.gain.setValueAtTime(sound.delayEnabled ? 0.5 : 0.0, this.ctx.currentTime);
+
+    // Connections in chain:
+    // Source -> gainNode -> filterNode -> pannerNode -> analyserNode -> Splits:
+    // Split 1: analyserNode -> dryGainNode -> masterGain
+    // Split 2: analyserNode -> wetGainNode -> Reverb convolver
+    // Split 3: analyserNode -> delayNode -> delayWetGainNode -> masterGain
+    gainNode.connect(filterNode);
+    filterNode.connect(pannerNode);
     pannerNode.connect(analyserNode);
-    analyserNode.connect(this.masterGain);
+    
+    analyserNode.connect(dryGainNode);
+    dryGainNode.connect(this.masterGain);
+
+    analyserNode.connect(wetGainNode);
+    if (sound.reverbType === 'short' && this.shortReverbNode) {
+      wetGainNode.connect(this.shortReverbNode);
+    } else if (sound.reverbType === 'long' && this.longReverbNode) {
+      wetGainNode.connect(this.longReverbNode);
+    }
+
+    // Delay loop connections
+    analyserNode.connect(delayNode);
+    delayNode.connect(delayFeedbackNode);
+    delayFeedbackNode.connect(delayNode); // feedback loop
+    delayNode.connect(delayWetGainNode);
+    delayWetGainNode.connect(this.masterGain);
 
     let sourceNode: AudioNode;
     const intervals: any[] = [];
@@ -120,8 +218,14 @@ class AudioEngine {
     this.activeNodes.set(sound.id, {
       sourceNode,
       gainNode,
+      filterNode,
       pannerNode,
       analyserNode,
+      dryGainNode,
+      wetGainNode,
+      delayNode,
+      delayFeedbackNode,
+      delayWetGainNode,
       proceduralIntervals: intervals,
     });
   }
@@ -154,8 +258,14 @@ class AudioEngine {
     try {
       nodes.sourceNode.disconnect();
       nodes.gainNode.disconnect();
+      nodes.filterNode.disconnect();
       nodes.pannerNode.disconnect();
       nodes.analyserNode.disconnect();
+      nodes.dryGainNode.disconnect();
+      nodes.wetGainNode.disconnect();
+      nodes.delayNode.disconnect();
+      nodes.delayFeedbackNode.disconnect();
+      nodes.delayWetGainNode.disconnect();
     } catch (e) {}
 
     this.activeNodes.delete(id);
@@ -226,6 +336,71 @@ class AudioEngine {
 
       // Smooth gain transition to avoid pops/crackles
       nodes.gainNode.gain.setTargetAtTime(targetGain, this.ctx!.currentTime, 0.1);
+
+      // EQ Filter updates
+      if (nodes.filterNode) {
+        const targetFType = sound.filterType && sound.filterType !== 'none' ? sound.filterType : 'allpass';
+        nodes.filterNode.type = targetFType;
+        nodes.filterNode.frequency.setTargetAtTime(sound.filterFrequency !== undefined ? sound.filterFrequency : 1000, this.ctx!.currentTime, 0.1);
+      }
+
+      // Echo / Delay updates
+      if (nodes.delayNode && nodes.delayFeedbackNode && nodes.delayWetGainNode) {
+        nodes.delayNode.delayTime.setTargetAtTime(sound.delayTime !== undefined ? sound.delayTime : 0.3, this.ctx!.currentTime, 0.1);
+        nodes.delayFeedbackNode.gain.setTargetAtTime(sound.delayFeedback !== undefined ? sound.delayFeedback : 0.4, this.ctx!.currentTime, 0.1);
+        
+        const targetDelayWet = sound.delayEnabled ? 0.5 : 0.0;
+        nodes.delayWetGainNode.gain.setTargetAtTime(targetDelayWet, this.ctx!.currentTime, 0.1);
+      }
+
+      // Reverb wetness & dynamic route reconnection
+      const wetness = sound.reverbWetness !== undefined ? sound.reverbWetness : 0.3;
+      nodes.dryGainNode.gain.setTargetAtTime(1.0 - wetness * 0.5, this.ctx!.currentTime, 0.1);
+      nodes.wetGainNode.gain.setTargetAtTime(wetness, this.ctx!.currentTime, 0.1);
+
+      // Reconnect wetGainNode to correct convolver dynamically
+      try {
+        nodes.wetGainNode.disconnect();
+        if (sound.reverbType === 'short' && this.shortReverbNode) {
+          nodes.wetGainNode.connect(this.shortReverbNode);
+        } else if (sound.reverbType === 'long' && this.longReverbNode) {
+          nodes.wetGainNode.connect(this.longReverbNode);
+        }
+      } catch (e) {
+        // Safe fail
+      }
+
+      // --- Doppler Effect (Speed of sound pitch-shifting) ---
+      let dopplerPitchFactor = 1.0;
+      if (sound.dopplerEnabled && nodes.prevDistance !== undefined) {
+        // Delta distance change over approx ~16ms frame (60fps)
+        const rawVel = (nodes.prevDistance - distance) / 0.016;
+        
+        // Low-pass smooth to avoid jittering
+        const smoothVel = nodes.smoothVelocity !== undefined 
+          ? nodes.smoothVelocity * 0.9 + rawVel * 0.1
+          : rawVel;
+        nodes.smoothVelocity = smoothVel;
+
+        const factor = sound.dopplerFactor !== undefined ? sound.dopplerFactor : 1.0;
+        const virtualSpeedOfSound = 30.0; // low speed of sound for dramatic effect in our small 3D coordinate system
+        
+        // Doppler formula multiplier
+        dopplerPitchFactor = 1.0 + (smoothVel / virtualSpeedOfSound) * factor;
+        // Clamp to safe audio playback limits
+        dopplerPitchFactor = Math.max(0.4, Math.min(2.5, dopplerPitchFactor));
+      } else {
+        nodes.smoothVelocity = 0;
+      }
+      nodes.prevDistance = distance;
+
+      // Apply pitch factor
+      if (nodes.sourceNode instanceof AudioBufferSourceNode) {
+        nodes.sourceNode.playbackRate.setTargetAtTime(dopplerPitchFactor, this.ctx!.currentTime, 0.1);
+      } else if (nodes.sourceNode instanceof OscillatorNode) {
+        const detuneCents = 1200 * Math.log2(dopplerPitchFactor);
+        nodes.sourceNode.detune.setTargetAtTime(detuneCents, this.ctx!.currentTime, 0.1);
+      }
 
       // --- Yaw-Aware Stereo Panning ---
       // Rotate the 2D offset vector opposite to the listener's yaw orientation

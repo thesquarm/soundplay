@@ -16,6 +16,17 @@ export interface SoundSource {
   isPlaying: boolean;
   volume: number; // 0 to 1
   fileSize?: string;
+  nodeShape?: 'sphere' | 'cube' | 'pyramid' | 'torus' | 'cylinder';
+  nodeColor?: string;
+  reverbWetness?: number; // 0 to 1
+  reverbType?: 'none' | 'short' | 'long';
+  delayEnabled?: boolean;
+  delayTime?: number; // 0.1 to 1.0
+  delayFeedback?: number; // 0 to 0.9
+  filterType?: 'none' | 'lowpass' | 'highpass';
+  filterFrequency?: number; // 100 to 10000
+  dopplerEnabled?: boolean;
+  dopplerFactor?: number; // 0 to 10
 }
 
 export interface CameraState {

@@ -8,6 +8,9 @@ export interface SavedSound {
   isPlaying: boolean;
   volume: number;
   buffer: ArrayBuffer;
+  nodeShape?: 'sphere' | 'cube' | 'pyramid' | 'torus' | 'cylinder';
+  nodeColor?: string;
+  reverbWetness?: number;
 }
 
 const DB_NAME = 'spatial-audio-explorer-db';
