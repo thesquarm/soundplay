@@ -1278,12 +1278,12 @@ export default function App() {
         }
 
         // Core central anchor point on the ground (indicating absolute coordinate position)
-        const shadowP = project({ x: sound.x, y: -0.7, z: sound.z }, width, height, cameraRef.current);
-        if (shadowP) {
+        const anchorShadowP = project({ x: sound.x, y: -0.7, z: sound.z }, width, height, cameraRef.current);
+        if (anchorShadowP) {
           ctx.strokeStyle = `rgba(${rgb}, ${isSelected ? 0.8 : 0.45})`;
           ctx.lineWidth = isSelected ? 2.0 : 1.0;
           ctx.beginPath();
-          ctx.arc(shadowP.x, shadowP.y, Math.max(2, 7 / shadowP.depth), 0, Math.PI * 2);
+          ctx.arc(anchorShadowP.x, anchorShadowP.y, Math.max(2, 7 / anchorShadowP.depth), 0, Math.PI * 2);
           ctx.stroke();
 
           ctx.fillStyle = `rgba(${rgb}, ${isSelected ? 0.22 : 0.08})`;
@@ -1375,6 +1375,34 @@ export default function App() {
 
         const volMultiplier = 0.3 + 1.7 * (sound.volume ?? 0.8);
         const shape = sound.nodeShape || 'sphere';
+
+        // Ground shadow & ambient aura beneath sound node
+        const shadowP = project({ x: sound.x, y: -0.69, z: sound.z }, width, height, cameraRef.current);
+        if (shadowP) {
+          const shadowRadius = Math.max(4, (32 * volMultiplier) / shadowP.depth);
+          const shadowGrad = ctx.createRadialGradient(shadowP.x, shadowP.y, 1, shadowP.x, shadowP.y, shadowRadius);
+          shadowGrad.addColorStop(0, `rgba(0, 0, 0, ${isSelected ? 0.6 : 0.4})`);
+          shadowGrad.addColorStop(0.5, `rgba(${rgb}, ${sound.isPlaying ? 0.25 : 0.1})`);
+          shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = shadowGrad;
+          ctx.beginPath();
+          ctx.arc(shadowP.x, shadowP.y, shadowRadius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Glowing core center dot
+        const centerP = project({ x: sound.x, y: -0.1 + floatOffset, z: sound.z }, width, height, cameraRef.current);
+        if (centerP) {
+          const coreRadius = Math.max(3, (12 + 18 * ampFactor * volMultiplier) / centerP.depth);
+          const coreGrad = ctx.createRadialGradient(centerP.x, centerP.y, 0, centerP.x, centerP.y, coreRadius * 2);
+          coreGrad.addColorStop(0, `rgba(255, 255, 255, ${sound.isPlaying ? 0.95 : 0.7})`);
+          coreGrad.addColorStop(0.3, `rgba(${rgb}, ${sound.isPlaying ? 0.85 : 0.5})`);
+          coreGrad.addColorStop(1, `rgba(${rgb}, 0)`);
+          ctx.fillStyle = coreGrad;
+          ctx.beginPath();
+          ctx.arc(centerP.x, centerP.y, coreRadius * 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
 
         if (shape === 'cube') {
           const s = (0.25 + 0.08 * ampFactor) * volMultiplier;
@@ -1525,7 +1553,7 @@ export default function App() {
 
         // --- CREATIVE ACOUSTIC EFFECTS ANIMATIONS ---
         if (sound.isPlaying) {
-          // 1. Reverb concentric ground wave ripples
+          // 1. Reverb concentric ground wave ripples with radial shockwave spokes
           if (sound.reverbType && sound.reverbType !== 'none') {
             const isLong = sound.reverbType === 'long';
             const reverbFactor = sound.reverbWetness ?? 0.3;
@@ -1538,9 +1566,26 @@ export default function App() {
               const rippleAlpha = (1.0 - rippleProgress) * reverbFactor * 0.45;
               renderBoundaryCircle(rippleRadius, `rgba(${rgb}, ${rippleAlpha})`, false);
             }
+
+            // Radial reverberation shockwave spokes
+            const spokeCount = isLong ? 8 : 6;
+            const spokeLen = (0.5 + 1.2 * reverbFactor) * volMultiplier;
+            ctx.strokeStyle = `rgba(${rgb}, ${reverbFactor * 0.3})`;
+            ctx.lineWidth = 1.0;
+            for (let sp = 0; sp < spokeCount; sp++) {
+              const spAngle = (sp / spokeCount) * Math.PI * 2 + t * 0.4;
+              const spP1 = project({ x: sound.x + Math.cos(spAngle) * 0.2 * volMultiplier, y: -0.69, z: sound.z + Math.sin(spAngle) * 0.2 * volMultiplier }, width, height, cameraRef.current);
+              const spP2 = project({ x: sound.x + Math.cos(spAngle) * spokeLen, y: -0.69, z: sound.z + Math.sin(spAngle) * spokeLen }, width, height, cameraRef.current);
+              if (spP1 && spP2) {
+                ctx.beginPath();
+                ctx.moveTo(spP1.x, spP1.y);
+                ctx.lineTo(spP2.x, spP2.y);
+                ctx.stroke();
+              }
+            }
           }
 
-          // 2. Delay Echo 3D winding helix coils
+          // 2. Delay Echo 3D winding helix coils + Orbiting Echo Satellites
           if (sound.delayEnabled) {
             const delayTimeVal = sound.delayTime ?? 0.3;
             const delayFbVal = sound.delayFeedback ?? 0.4;
@@ -1564,9 +1609,40 @@ export default function App() {
               }
             }
             drawWireframeEdges(helixVertices, helixEdges);
+
+            // Orbiting Echo Ghost Satellites (representing feedback repeats)
+            const echoSatCount = Math.min(5, Math.max(2, Math.round(delayFbVal * 6)));
+            for (let es = 0; es < echoSatCount; es++) {
+              const orbSpeed = 1.8 / delayTimeVal;
+              const orbAngle = (es / echoSatCount) * Math.PI * 2 + t * orbSpeed;
+              const orbDist = (0.55 + 0.2 * es) * volMultiplier;
+              const satX = sound.x + Math.cos(orbAngle) * orbDist;
+              const satY = -0.1 + floatOffset + Math.sin(t * 4 + es) * 0.12 * volMultiplier;
+              const satZ = sound.z + Math.sin(orbAngle) * orbDist;
+
+              const satP = project({ x: satX, y: satY, z: satZ }, width, height, cameraRef.current);
+              if (satP) {
+                const satRadius = Math.max(2, (4 + 3 * ampFactor) / satP.depth);
+                ctx.fillStyle = `rgba(${rgb}, ${0.85 - es * 0.15})`;
+                ctx.beginPath();
+                ctx.arc(satP.x, satP.y, satRadius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Connect echo satellite back to node center with fine dashed line
+                const satCenterP = project({ x: sound.x, y: -0.1 + floatOffset, z: sound.z }, width, height, cameraRef.current);
+                if (satCenterP) {
+                  ctx.strokeStyle = `rgba(${rgb}, ${0.4 - es * 0.08})`;
+                  ctx.lineWidth = 0.8;
+                  ctx.beginPath();
+                  ctx.moveTo(satCenterP.x, satCenterP.y);
+                  ctx.lineTo(satP.x, satP.y);
+                  ctx.stroke();
+                }
+              }
+            }
           }
 
-          // 3. Filter EQ cutoff shields and air halos
+          // 3. Filter EQ cutoff shields (Lowpass Dome / Highpass Beam)
           if (sound.filterType && sound.filterType !== 'none') {
             const isLowpass = sound.filterType === 'lowpass';
             const filterRadius = (0.52 + 0.08 * Math.cos(t * 6.0)) * volMultiplier;
@@ -1587,10 +1663,26 @@ export default function App() {
             drawWireframeEdges(ringVertices, ringEdges);
             
             if (isLowpass) {
+              // Lowpass protective grid dome
               const plateCrossEdges: [number, number][] = [
                 [0, 8], [4, 12]
               ];
               drawWireframeEdges(ringVertices, plateCrossEdges);
+            } else {
+              // Highpass upward energy beam projection
+              const beamTopP = project({ x: sound.x, y: -0.1 + floatOffset + 1.2 * volMultiplier, z: sound.z }, width, height, cameraRef.current);
+              const beamBotP = project({ x: sound.x, y: -0.1 + floatOffset, z: sound.z }, width, height, cameraRef.current);
+              if (beamTopP && beamBotP) {
+                const beamGrad = ctx.createLinearGradient(beamBotP.x, beamBotP.y, beamTopP.x, beamTopP.y);
+                beamGrad.addColorStop(0, `rgba(${rgb}, 0.6)`);
+                beamGrad.addColorStop(1, `rgba(${rgb}, 0)`);
+                ctx.strokeStyle = beamGrad;
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.moveTo(beamBotP.x, beamBotP.y);
+                ctx.lineTo(beamTopP.x, beamTopP.y);
+                ctx.stroke();
+              }
             }
           }
 
@@ -1616,14 +1708,45 @@ export default function App() {
           }
         }
 
+        // --- SELECTED NODE TARGETING RETICLE HUD ---
+        if (isSelected && centerP) {
+          const reticleSize = Math.max(22, (55 * volMultiplier) / centerP.depth);
+          ctx.strokeStyle = `rgba(${rgb}, 0.95)`;
+          ctx.lineWidth = 1.5;
+
+          const cornerLen = reticleSize * 0.35;
+          const left = centerP.x - reticleSize;
+          const right = centerP.x + reticleSize;
+          const top = centerP.y - reticleSize;
+          const bottom = centerP.y + reticleSize;
+
+          // Top-left corner
+          ctx.beginPath(); ctx.moveTo(left, top + cornerLen); ctx.lineTo(left, top); ctx.lineTo(left + cornerLen, top); ctx.stroke();
+          // Top-right corner
+          ctx.beginPath(); ctx.moveTo(right - cornerLen, top); ctx.lineTo(right, top); ctx.lineTo(right, top + cornerLen); ctx.stroke();
+          // Bottom-left corner
+          ctx.beginPath(); ctx.moveTo(left, bottom - cornerLen); ctx.lineTo(left, bottom); ctx.lineTo(left + cornerLen, bottom); ctx.stroke();
+          // Bottom-right corner
+          ctx.beginPath(); ctx.moveTo(right - cornerLen, bottom); ctx.lineTo(right, bottom); ctx.lineTo(right, bottom - cornerLen); ctx.stroke();
+        }
+
         // Float a human readable monospace tag above the liquid visualizer
         const labelHeight = 1.35;
         const labelP = project({ x: sound.x, y: -0.7 + floatOffset + labelHeight, z: sound.z }, width, height, cameraRef.current);
         if (labelP) {
+          // Compute acoustic active effect badges
+          const activeBadges: string[] = [];
+          if (sound.reverbType && sound.reverbType !== 'none') activeBadges.push('REV');
+          if (sound.delayEnabled) activeBadges.push('DEL');
+          if (sound.filterType && sound.filterType !== 'none') activeBadges.push(sound.filterType === 'lowpass' ? 'LP' : 'HP');
+          if (sound.dopplerEnabled) activeBadges.push('DOP');
+
+          const badgeText = activeBadges.length > 0 ? ` [${activeBadges.join('·')}]` : '';
+
           // If hovered or selected, render volume popup or direct volume tag
           const labelText = isHovered 
-            ? `${sound.name} (VOL: ${Math.round(sound.volume * 100)}%)`
-            : sound.name;
+            ? `${sound.name}${badgeText} (${Math.round(sound.volume * 100)}%)`
+            : `${sound.name}${badgeText}`;
             
           ctx.font = 'bold 9px monospace';
           const textWidth = ctx.measureText(labelText).width;
