@@ -177,13 +177,18 @@ export default function SoundList({
               ref={fileInputRef}
               id="audio-file-upload"
               type="file"
-              accept="audio/*,video/*,.mp3,.wav,.m4a,.caf,.mp4,.aac,.ogg,.webm"
+              accept="audio/*,video/*,.wav,.WAV,.wave,.mp3,.m4a,.m4r,.aac,.caf,.aiff,.aif,.flac,.ogg,.webm,.mp4,audio/wav,audio/x-wav,audio/wave,audio/vnd.wave,audio/mpeg,audio/mp4,audio/aac,audio/x-m4a,audio/m4a,audio/caf,audio/aiff,*/*"
               onChange={handleFileUpload}
               className="hidden"
             />
             <button
               id="trigger-upload-btn"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => {
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = '';
+                  fileInputRef.current.click();
+                }
+              }}
               className="w-full flex flex-col items-center justify-center gap-1.5 py-2.5 px-3 border border-zinc-200 hover:border-zinc-900 rounded-xl bg-white hover:bg-zinc-50 text-xs font-bold text-zinc-800 shadow-2xs hover:shadow-xs transition-all cursor-pointer text-center"
             >
               <Upload className="w-4 h-4 text-zinc-600" />

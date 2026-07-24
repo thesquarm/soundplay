@@ -22,7 +22,8 @@ import {
   Upload,
   Mic,
   Square,
-  Droplet
+  Droplet,
+  X
 } from 'lucide-react';
 import { audioService } from './audioEngine';
 import { SoundSource, CameraState, SoundType } from './types';
@@ -288,23 +289,17 @@ export default function App() {
       // Decode any loaded IndexedDB buffers
       const idbSounds = await loadSounds();
       for (const saved of idbSounds) {
-        if (audioService.ctx && !audioService.hasBuffer(saved.id)) {
+        if (!audioService.hasBuffer(saved.id)) {
           try {
-            const bufCopy = saved.buffer.slice(0);
-            audioService.ctx.decodeAudioData(
-              bufCopy,
-              (decodedBuffer) => {
-                audioService.storeBuffer(saved.id, decodedBuffer);
-                // Trigger play if active
-                const current = sounds.find((s) => s.id === saved.id);
-                if (current && current.isPlaying) {
-                  audioService.startSound(current);
-                }
-              },
-              (err) => console.error(`Error restoring custom audio ${saved.name}:`, err)
-            );
-          } catch (e) {
-            console.error(e);
+            const decodedBuffer = await audioService.decodeAudioDataFallback(saved.buffer, 'audio/wav', saved.name);
+            audioService.storeBuffer(saved.id, decodedBuffer);
+            // Trigger play if active
+            const current = sounds.find((s) => s.id === saved.id);
+            if (current && current.isPlaying) {
+              audioService.startSound(current);
+            }
+          } catch (err) {
+            console.error(`Error restoring custom audio ${saved.name}:`, err);
           }
         }
       }
@@ -436,6 +431,9 @@ export default function App() {
     const name = file.name.split('.')[0] || 'Custom Sound';
     
     handleAddSound('uploaded', name, file);
+    if (topFileInputRef.current) {
+      topFileInputRef.current.value = '';
+    }
   };
 
   const handleAddSound = async (type: SoundType, name: string, file?: File) => {
@@ -468,6 +466,9 @@ export default function App() {
 
     if (file) {
       try {
+        audioService.init();
+        await audioService.resume();
+
         // Parse custom audio file into Web Audio buffer
         const arrayBuffer = await file.arrayBuffer();
         
@@ -492,29 +493,14 @@ export default function App() {
           dopplerFactor: 1.0,
         } as any, arrayBuffer);
 
-        if (audioService.ctx) {
-          // Decode a slice copy of the arrayBuffer since decodeAudioData consumes the buffer
-          const bufCopy = arrayBuffer.slice(0);
-          audioService.ctx.decodeAudioData(
-            bufCopy,
-            (buffer) => {
-              audioService.storeBuffer(id, buffer);
-              // Register & boot
-              setSounds((prev) => [...prev, newSound]);
-              audioService.startSound(newSound);
-              setSelectedSoundId(id);
-            },
-            (err) => {
-              alert('Error decoding audio file. Make sure it is a valid format (.mp3, .wav, etc.)');
-            }
-          );
-        } else {
-          // If context is not started yet, still register in sounds so it shows up in UI
-          setSounds((prev) => [...prev, newSound]);
-          setSelectedSoundId(id);
-        }
-      } catch (err) {
+        const decodedBuffer = await audioService.decodeAudioDataFallback(arrayBuffer, file.type, file.name);
+        audioService.storeBuffer(id, decodedBuffer);
+        setSounds((prev) => [...prev, newSound]);
+        audioService.startSound(newSound);
+        setSelectedSoundId(id);
+      } catch (err: any) {
         console.error('File load failed:', err);
+        alert(`Unable to process "${file.name}". Please ensure it is a valid audio file (.wav, .mp3, .m4a, etc.).`);
       }
     } else {
       // Procedural sound addition
@@ -2099,13 +2085,18 @@ export default function App() {
             ref={topFileInputRef}
             id="top-audio-file-upload"
             type="file"
-            accept="audio/*"
+            accept="audio/*,video/*,.wav,.WAV,.wave,.mp3,.m4a,.m4r,.aac,.caf,.aiff,.aif,.flac,.ogg,.webm,.mp4,audio/wav,audio/x-wav,audio/wave,audio/vnd.wave,audio/mpeg,audio/mp4,audio/aac,audio/x-m4a,audio/m4a,audio/caf,audio/aiff,*/*"
             onChange={handleTopFileUpload}
             className="hidden"
           />
           <button
             id="top-trigger-upload-btn"
-            onClick={() => topFileInputRef.current?.click()}
+            onClick={() => {
+              if (topFileInputRef.current) {
+                topFileInputRef.current.value = '';
+                topFileInputRef.current.click();
+              }
+            }}
             className="px-3.5 py-2.5 rounded-xl border border-zinc-800 bg-zinc-950/95 text-zinc-100 hover:bg-zinc-900 hover:border-zinc-500 hover:text-white hover:scale-[1.03] active:scale-95 transition-all duration-150 cursor-pointer shadow-xl flex items-center gap-2"
             title="Direct Upload Custom Audio File"
           >
@@ -2142,7 +2133,7 @@ export default function App() {
 
       {/* Selected Sound Inspector (Overlay HUD shifted up to sit neatly above the creator buttons) */}
       {selectedSoundId && (
-        <div className="absolute bottom-22 right-6 z-20 max-w-xs w-full pointer-events-auto">
+        <div className="absolute bottom-16 sm:bottom-22 right-3 sm:right-6 z-20 max-w-[calc(100vw-24px)] sm:max-w-xs w-full pointer-events-auto">
           {sounds.find(s => s.id === selectedSoundId) ? (
             (() => {
               const s = sounds.find(sound => sound.id === selectedSoundId)!;
@@ -2151,10 +2142,13 @@ export default function App() {
               const d = Math.sqrt(dx*dx + dz*dz).toFixed(1);
 
               return (
-                <div id="inspector-overlay-card" className="p-4 bg-white border border-zinc-950 shadow-md rounded-xl flex flex-col gap-2.5">
-                  <div className="flex items-start justify-between gap-4">
+                <div 
+                  id="inspector-overlay-card" 
+                  className="p-4 bg-white border-2 border-zinc-950 shadow-2xl rounded-2xl flex flex-col gap-2.5 max-h-[calc(100vh-100px)] sm:max-h-[calc(100vh-130px)] overflow-y-auto overscroll-contain"
+                >
+                  <div className="sticky -top-4 -mt-4 -mx-4 p-4 pb-2.5 bg-white/95 backdrop-blur-md z-20 border-b border-zinc-200 flex items-start justify-between gap-3 rounded-t-2xl shadow-2xs">
                     <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-bold text-zinc-400 font-mono uppercase tracking-widest mb-1.5">
+                      <p className="text-[10px] font-bold text-zinc-400 font-mono uppercase tracking-widest mb-1">
                         Active Sound Selected
                       </p>
                       <input
@@ -2168,9 +2162,11 @@ export default function App() {
                     <button
                       id="close-inspector-btn"
                       onClick={() => setSelectedSoundId(null)}
-                      className="text-xs text-zinc-400 hover:text-zinc-950 font-mono font-bold hover:bg-zinc-100 p-1 rounded-sm cursor-pointer"
+                      className="p-1.5 -mr-1 -mt-0.5 text-zinc-600 hover:text-zinc-950 bg-zinc-100 hover:bg-zinc-200 active:bg-zinc-300 rounded-lg cursor-pointer shrink-0 transition-all flex items-center justify-center border border-zinc-300"
+                      title="Close popup"
+                      aria-label="Close sound inspector"
                     >
-                      ✕
+                      <X className="w-4 h-4 stroke-[2.5]" />
                     </button>
                   </div>
 
@@ -2537,36 +2533,105 @@ export default function App() {
             <div className="text-center mb-4">
               <Compass className="w-8 h-8 text-zinc-900 mx-auto mb-2 animate-spin-slow" />
               <h3 className="text-lg font-bold font-sans uppercase text-zinc-950 tracking-tight">
-                Controls Directory
+                Spatial Audio Studio Guide
               </h3>
+              <p className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest mt-0.5">
+                sound_play — User & Info Hub
+              </p>
+            </div>
+
+            {/* Top Creator & Contact Attribution Card */}
+            <div className="p-3 bg-zinc-900 text-white rounded-xl border border-zinc-950 text-center space-y-1 mb-4 shadow-sm">
+              <p className="text-xs font-bold font-sans">
+                App created by Philip and Google AI Studio
+              </p>
+              <p className="text-[10px] font-mono text-zinc-300">
+                Questions or feedback? Contact Philip:{' '}
+                <a 
+                  href="mailto:philip.stade@gmail.com" 
+                  className="text-indigo-300 hover:text-indigo-200 underline font-bold transition-colors"
+                >
+                  philip.stade@gmail.com
+                </a>
+                {' '}/{' '}
+                <a 
+                  href="mailto:p.stade@mh-freiburg.de" 
+                  className="text-indigo-300 hover:text-indigo-200 underline transition-colors"
+                >
+                  p.stade@mh-freiburg.de
+                </a>
+              </p>
             </div>
 
             <div className="space-y-4 text-xs text-zinc-600 font-sans leading-relaxed">
               <p>
-                Welcome to <strong className="text-zinc-900 font-semibold">sound_play</strong>, a minimalist sketches visual canvas containing fully 3D spatialized stereo sounds.
+                Welcome to <strong className="text-zinc-900 font-semibold">sound_play</strong>, an interactive 3D spatial soundscape designer and acoustic canvas.
               </p>
-              
+
+              {/* NAVIGATION */}
               <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-1.5 font-mono text-[10px]">
-                <div className="font-extrabold text-zinc-900 text-[11px]">NAVIGATION CONTROLS:</div>
+                <div className="font-extrabold text-zinc-900 text-[11px] font-sans">NAVIGATION CONTROLS:</div>
                 <div>• <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">W</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">S</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">↑</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">↓</kbd> : Move Forward / Backward</div>
                 <div>• <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">A</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">D</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">←</kbd> / <kbd className="px-1 py-0.5 border rounded-sm bg-white shadow-xs">→</kbd> : Strafe Left / Right</div>
-                <div>• <strong>On Mobile/Tablets:</strong> Drag the touch joystick at the bottom-left of the screen.</div>
+                <div>• <strong>Drag Canvas / Mouse Look:</strong> Rotate perspective in 360 degrees.</div>
+                <div>• <strong>Mobile Touch:</strong> Drag the touch joystick at the bottom-left of the screen.</div>
               </div>
 
-              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-2.5">
-                <div className="font-extrabold text-zinc-900 text-[11px] font-mono">AVAILABLE SOUND OPTIONS:</div>
-                <div className="space-y-1.5 leading-snug">
-                  <div>• <strong className="text-zinc-800 font-mono">North (Grey)</strong>: Natural open-air bird song synthesizer representing organic forest heights.</div>
-                  <div>• <strong className="text-zinc-800 font-mono">East (Yellow)</strong>: High-fidelity micro-tonal bee buzzes reflecting rapid wing vibrations.</div>
-                  <div>• <strong className="text-zinc-800 font-mono">South (Red)</strong>: Soft falling rain showers backed by periodic resonant thunderclaps.</div>
-                  <div>• <strong className="text-zinc-800 font-mono">West (Green)</strong>: Steady constant mid-frequency soundwaves for calming auditory meditation.</div>
-                  <div>• <strong className="text-zinc-800 font-mono">Upload / Record</strong>: Add your own custom stereo files (.mp3, .wav) or record live microphone clips in real-time!</div>
+              {/* ACOUSTIC EFFECTS & DSP GUIDE */}
+              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-2">
+                <div className="font-extrabold text-zinc-900 text-[11px] font-mono uppercase tracking-wider">ACOUSTIC EFFECTS & DSP ENGINE:</div>
+                <div className="space-y-2 text-[11px] leading-normal">
+                  <div>
+                    <strong className="text-zinc-900 font-bold">1. Space Reverb:</strong> Simulates acoustic room reflections (Short, Medium, Long Reverb) with adjustable Wetness percentage. Creates expanding 3D ground ripples and radial shockwave spokes.
+                  </div>
+                  <div>
+                    <strong className="text-zinc-900 font-bold">2. Echo Loop (Delay):</strong> Pitch-synchronized feedback delay. Customize Delay Time (seconds) and Feedback intensity. Features 3D winding helix coils and orbiting echo satellites.
+                  </div>
+                  <div>
+                    <strong className="text-zinc-900 font-bold">3. Filter EQ:</strong> Toggle Lowpass (attenuates highs for warm submerged depth with a protective dome) or Highpass (cuts lows for crisp focus with an upward energy beam).
+                  </div>
+                  <div>
+                    <strong className="text-zinc-900 font-bold">4. Doppler Pitch Effect:</strong> Simulates physical wave compression/expansion, shifting sound pitch dynamically as you walk towards or away from moving audio nodes.
+                  </div>
                 </div>
               </div>
 
-              <p>
-                Use the top toolbar to direct upload or record live soundscapes, toggle the <strong>Sources Panel</strong> to adjust volume and rename sources, or start the <strong>Performance Recorder</strong> to download your explorations as premium video or audio files!
-              </p>
+              {/* 3D NODE CUSTOMIZATION & CONTROLS */}
+              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-2">
+                <div className="font-extrabold text-zinc-900 text-[11px] font-mono uppercase tracking-wider">NODE CUSTOMIZATION & FUNCTIONS:</div>
+                <div className="space-y-1.5 text-[11px] leading-normal">
+                  <div>• <strong className="text-zinc-900">3D Primitive Geometries:</strong> Morph nodes into Spheres, Cubes, Pyramids, Tori, or Cylinders.</div>
+                  <div>• <strong className="text-zinc-900">Aura Accent Colors:</strong> Personalize individual node aura hues and ambient ground glow reflections.</div>
+                  <div>• <strong className="text-zinc-900">3D Spatial Panning:</strong> Click and drag nodes directly on the 3D grid or use distance attenuation sliders.</div>
+                  <div>• <strong className="text-zinc-900">Mute & Solo Controls:</strong> Focus on individual tracks or isolate spatial layers.</div>
+                </div>
+              </div>
+
+              {/* AUDIO SOURCES & RECORDING */}
+              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-2">
+                <div className="font-extrabold text-zinc-900 text-[11px] font-mono uppercase tracking-wider">AUDIO SOURCES & RECORDING:</div>
+                <div className="space-y-1.5 text-[11px] leading-normal">
+                  <div>• <strong className="text-zinc-900">Procedural Synthesizers:</strong> Birds (North), Bees (East), Rain & Thunder (South), Constant Frequency (West).</div>
+                  <div>• <strong className="text-zinc-900">Custom Audio Uploads:</strong> Full iOS & desktop support for `.wav`, `.mp3`, `.m4a`, `.caf`, `.flac`, `.ogg` files.</div>
+                  <div>• <strong className="text-zinc-900">Live Microphone:</strong> Sample ambient audio or live vocals directly into spatial sound nodes.</div>
+                  <div>• <strong className="text-zinc-900">Master Performance Recorder:</strong> Capture binaural audio sessions and export downloadable master tracks.</div>
+                </div>
+              </div>
+
+              {/* DATA PRIVACY & VERCEL POLICY */}
+              <div className="p-3.5 bg-zinc-900 text-zinc-100 rounded-xl border border-zinc-950 space-y-2 font-sans">
+                <div className="font-extrabold text-amber-400 text-[11px] font-mono uppercase tracking-wider flex items-center gap-1.5">
+                  <span>🍪</span> DATA PRIVACY & VERCEL HOSTING:
+                </div>
+                <div className="space-y-2 text-[11px] leading-relaxed text-zinc-300">
+                  <p>
+                    <strong className="text-white">100% Local Storage:</strong> All custom uploaded audio files (.wav, .mp3, etc.), microphone recordings, and spatial coordinates are stored strictly locally in your browser's IndexedDB and localStorage. No audio files or personal soundscapes are ever uploaded to or stored on an external server.
+                  </p>
+                  <p className="text-zinc-400">
+                    <strong className="text-zinc-200">Vercel Deployment:</strong> Deployed via Vercel as a static web application and CDN. Processing is limited to standard HTTP connection logs (IP address, user agent) solely for security and edge routing. Vercel does not inspect, access, or store your audio data.
+                  </p>
+                </div>
+              </div>
             </div>
 
             <button
@@ -2580,29 +2645,43 @@ export default function App() {
         </div>
       )}
 
-      {/* FOOTER METADATA */}
-      <footer className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 pointer-events-none select-none text-[8.5px] font-sans text-center text-zinc-400/80 max-w-[92vw] leading-tight">
-        App by Philip and Google AI Studio / If you have any questions or feedback, please contact Philip, <a href="mailto:p.stade@mh-freiburg.de" className="pointer-events-auto hover:text-zinc-200 underline transition-colors">p.stade@mh-freiburg.de</a>
-      </footer>
-
-      {/* 8. COOKIE CONSENT BANNER */}
+      {/* 8. COOKIE & VERCEL DATA PRIVACY BANNER */}
       {showCookieBanner && (
-        <div className="fixed bottom-4 left-4 right-4 md:left-6 md:right-auto md:max-w-md bg-zinc-900/95 backdrop-blur-md text-zinc-100 p-4 rounded-xl border border-zinc-800 shadow-2xl z-50 animate-slide-up flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 select-none">
-          <div className="flex-1">
-            <p className="text-xs font-semibold tracking-tight text-zinc-100 flex items-center gap-1.5 mb-1 font-sans">
-              🍪 Cookie Settings
+        <div className="fixed bottom-4 left-4 right-4 md:left-6 md:right-auto md:max-w-md bg-zinc-950/95 backdrop-blur-xl text-zinc-100 p-4.5 rounded-2xl border border-zinc-800 shadow-2xl z-50 animate-slide-up flex flex-col gap-3 select-none">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🍪</span>
+              <p className="text-xs font-bold tracking-tight text-white font-sans">
+                Browser Session & Vercel Data Privacy
+              </p>
+            </div>
+            <button
+              onClick={handleAcceptCookies}
+              className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 text-xs font-mono transition-colors cursor-pointer"
+              title="Dismiss banner"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="text-[11px] text-zinc-300 leading-relaxed font-sans space-y-2 bg-zinc-900/80 p-3 rounded-xl border border-zinc-800/80">
+            <p>
+              <strong className="text-white">Local Storage Session:</strong> All custom uploaded audio files (.wav, .mp3), live microphone recordings, and spatial coordinates are stored <strong>100% locally in your browser's IndexedDB and local storage</strong>. No audio data or custom soundscapes are ever sent to or stored on an external server.
             </p>
-            <p className="text-[10px] text-zinc-400 leading-normal font-sans">
-              We use local storage cookies to securely preserve your virtual coordinates, custom spatial soundtracks, and recording preferences.
+            <p className="text-zinc-400">
+              <strong className="text-zinc-300">Vercel Hosting:</strong> This application is deployed via Vercel. Vercel operates strictly as a static web host and CDN, processing standard HTTP connection logs (IP address, user agent) solely for edge delivery and security. Vercel does not access, inspect, or store your audio files.
             </p>
           </div>
-          <button
-            id="accept-cookies-btn"
-            onClick={handleAcceptCookies}
-            className="w-full sm:w-auto shrink-0 bg-white hover:bg-zinc-200 text-zinc-950 text-[10px] font-extrabold uppercase tracking-widest px-4 py-2 rounded-lg cursor-pointer transition-all text-center border border-zinc-100"
-          >
-            Accept
-          </button>
+
+          <div className="flex items-center justify-end gap-2 pt-0.5">
+            <button
+              id="accept-cookies-btn"
+              onClick={handleAcceptCookies}
+              className="w-full sm:w-auto bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-extrabold uppercase tracking-wider px-4 py-2 rounded-xl cursor-pointer transition-all text-center border border-zinc-100 shadow-md"
+            >
+              Got it, Accept & Continue
+            </button>
+          </div>
         </div>
       )}
 

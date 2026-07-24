@@ -22,23 +22,21 @@ export default function HelpModal({ onStart }: HelpModalProps) {
 
       <div className="max-w-xl w-full border border-zinc-800/80 rounded-2xl p-6 md:p-8 bg-zinc-950/80 backdrop-blur-xl shadow-2xl flex flex-col gap-6 relative z-10 hover:border-zinc-700/50 transition-colors duration-500">
         
-        {/* Sound Logo from Screenshot */}
+        {/* Sound Logo & Title */}
         <div className="flex flex-col items-center justify-center text-center select-none order-1">
           <h1 
-            className="text-3xl md:text-[40px] font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-white via-zinc-100 to-zinc-400 font-sans uppercase"
-            style={{ fontSize: '40px' }}
+            className="text-3xl md:text-[40px] font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-white via-zinc-100 to-zinc-400 font-sans"
           >
             sound_play
           </h1>
           <p 
-            className="text-[10px] md:text-xs font-bold tracking-[0.25em] text-zinc-300 font-mono uppercase mt-2"
-            style={{ fontFamily: 'monospace' }}
+            className="text-[10px] md:text-xs font-bold tracking-[0.2em] text-amber-400 font-mono uppercase mt-1"
           >
-            A spatial soundscape designer
+            a spatial soundscape designer
           </p>
           
           {/* Vertical lines and dot logo with colorful ambient aura: | · | */}
-          <div className="flex items-center gap-1.5 mt-4 relative">
+          <div className="flex items-center gap-1.5 mt-3 relative">
             <span className="w-1 h-5 bg-gradient-to-b from-indigo-400 to-indigo-600 rounded-full opacity-95 shadow-lg shadow-indigo-500/50" />
             <span className="w-1.5 h-1.5 bg-rose-500 rounded-full opacity-95 shadow-lg shadow-rose-500/50 animate-ping absolute left-2.5" />
             <span className="w-1.5 h-1.5 bg-rose-500 rounded-full opacity-95 shadow-lg shadow-rose-500/50" />

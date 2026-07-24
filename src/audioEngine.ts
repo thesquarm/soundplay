@@ -118,6 +118,125 @@ class AudioEngine {
     return this.audioBuffers.has(id);
   }
 
+  // Robust audio decoder for iOS Safari & standard browsers
+  public async decodeAudioDataFallback(arrayBuffer: ArrayBuffer, mimeType?: string, fileName?: string): Promise<AudioBuffer> {
+    this.init();
+    await this.resume();
+
+    const ctx = this.ctx!;
+
+    // 1. First attempt: standard decodeAudioData with a slice copy
+    try {
+      const copy1 = arrayBuffer.slice(0);
+      return await new Promise<AudioBuffer>((resolve, reject) => {
+        let isSettled = false;
+        try {
+          const p = ctx.decodeAudioData(
+            copy1,
+            (buf) => {
+              if (!isSettled) { isSettled = true; resolve(buf); }
+            },
+            (err) => {
+              if (!isSettled) { isSettled = true; reject(err); }
+            }
+          );
+          if (p && typeof (p as any).then === 'function') {
+            (p as any).then((buf: AudioBuffer) => {
+              if (!isSettled) { isSettled = true; resolve(buf); }
+            }).catch((err: any) => {
+              if (!isSettled) { isSettled = true; reject(err); }
+            });
+          }
+        } catch (e) {
+          if (!isSettled) { isSettled = true; reject(e); }
+        }
+      });
+    } catch (e1) {
+      console.warn('Standard decodeAudioData failed, trying Blob arrayBuffer fallback:', e1);
+    }
+
+    // 2. Second attempt: Re-wrap in Blob with explicit audio MIME type
+    try {
+      const copy2 = arrayBuffer.slice(0);
+      const isWav = fileName?.toLowerCase().endsWith('.wav') || mimeType?.includes('wav');
+      const targetType = mimeType || (isWav ? 'audio/wav' : 'audio/mpeg');
+      const blob = new Blob([copy2], { type: targetType });
+      const blobBuf = await blob.arrayBuffer();
+
+      return await new Promise<AudioBuffer>((resolve, reject) => {
+        let isSettled = false;
+        ctx.decodeAudioData(
+          blobBuf,
+          (buf) => { if (!isSettled) { isSettled = true; resolve(buf); } },
+          (err) => { if (!isSettled) { isSettled = true; reject(err); } }
+        );
+      });
+    } catch (e2) {
+      console.warn('Blob decodeAudioData failed, trying audio element decoding:', e2);
+    }
+
+    // 3. Third attempt: Decode via Audio element & OfflineAudioContext
+    try {
+      return await this.decodeViaAudioElement(arrayBuffer, mimeType, fileName);
+    } catch (e3) {
+      console.error('All audio decoding methods failed:', e3);
+      throw new Error('Unable to decode audio data on this device');
+    }
+  }
+
+  private async decodeViaAudioElement(arrayBuffer: ArrayBuffer, mimeType?: string, fileName?: string): Promise<AudioBuffer> {
+    const isWav = fileName?.toLowerCase().endsWith('.wav') || mimeType?.includes('wav');
+    const targetType = mimeType || (isWav ? 'audio/wav' : 'audio/mpeg');
+    const blob = new Blob([arrayBuffer], { type: targetType });
+    const url = URL.createObjectURL(blob);
+
+    return new Promise((resolve, reject) => {
+      const audio = new Audio();
+      audio.src = url;
+      audio.crossOrigin = 'anonymous';
+
+      const timeout = setTimeout(() => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Audio element load timeout'));
+      }, 8000);
+
+      audio.onloadeddata = async () => {
+        clearTimeout(timeout);
+        try {
+          const duration = audio.duration;
+          if (!duration || isNaN(duration) || duration <= 0) {
+            URL.revokeObjectURL(url);
+            return reject(new Error('Invalid duration'));
+          }
+
+          const sampleRate = this.ctx?.sampleRate || 44100;
+          const offlineCtx = new (window.OfflineAudioContext || (window as any).webkitOfflineAudioContext)(
+            2,
+            Math.ceil(duration * sampleRate),
+            sampleRate
+          );
+
+          const fetchResp = await fetch(url);
+          const freshBuf = await fetchResp.arrayBuffer();
+          const decoded = await offlineCtx.decodeAudioData(freshBuf);
+          URL.revokeObjectURL(url);
+          resolve(decoded);
+        } catch (err) {
+          URL.revokeObjectURL(url);
+          reject(err);
+        }
+      };
+
+      audio.onerror = () => {
+        clearTimeout(timeout);
+        URL.revokeObjectURL(url);
+        reject(new Error('Audio element error'));
+      };
+
+      audio.load();
+    });
+  }
+
   // Start a specific sound source
   public startSound(sound: SoundSource) {
     this.init();
