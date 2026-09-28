@@ -1,7 +1,8 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { Play, Pause, Trash2, MapPin, Volume2, Plus, Upload, Music, Mic, Square } from 'lucide-react';
+import React, { useRef } from 'react';
+import { Play, Pause, Trash2, MapPin, Volume2, Upload, Music, Mic, Square } from 'lucide-react';
 import { SoundSource, SoundType } from '../types';
-import { audioService } from '../audioEngine';
+import { useMicRecorder } from '../hooks/useMicRecorder';
+import { AUDIO_INPUT_ACCEPT, validateAudioUpload, extractSoundName } from '../lib/audioValidation';
 
 interface SoundListProps {
   sounds: SoundSource[];
@@ -10,8 +11,10 @@ interface SoundListProps {
   onDeleteSound: (id: string) => void;
   onDeleteAllSounds?: () => void;
   onAddSound: (type: SoundType, name: string, file?: File) => void;
+  onAddRecordedSound?: (file: File) => void;
   onTeleportTo: (x: number, z: number) => void;
   onClose?: () => void;
+  onError?: (message: string) => void;
 }
 
 export default function SoundList({
@@ -21,8 +24,10 @@ export default function SoundList({
   onDeleteSound,
   onDeleteAllSounds,
   onAddSound,
+  onAddRecordedSound,
   onTeleportTo,
   onClose,
+  onError,
 }: SoundListProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -32,83 +37,21 @@ export default function SoundList({
     }
   };
 
-  const [isRecordingMic, setIsRecordingMic] = useState(false);
-  const [micSeconds, setMicSeconds] = useState(0);
-  const [micError, setMicError] = useState<string | null>(null);
-  
-  const micMediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const micChunksRef = useRef<Blob[]>([]);
-  const micTimerRef = useRef<any>(null);
-
-  useEffect(() => {
-    return () => {
-      if (micTimerRef.current) clearInterval(micTimerRef.current);
-    };
-  }, []);
-
-  const startMicRecording = async () => {
-    setMicError(null);
-    micChunksRef.current = [];
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      micMediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          micChunksRef.current.push(e.data);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        // Use the actual MIME type of the recorded chunks
-        const actualMimeType = mediaRecorder.mimeType || 'audio/mp4';
-        const blob = new Blob(micChunksRef.current, { type: actualMimeType });
-        
-        // Determine correct file extension based on mimeType
-        let extension = 'mp4';
-        if (actualMimeType.includes('webm')) {
-          extension = 'webm';
-        } else if (actualMimeType.includes('ogg')) {
-          extension = 'ogg';
-        } else if (actualMimeType.includes('wav')) {
-          extension = 'wav';
-        } else if (actualMimeType.includes('aac')) {
-          extension = 'aac';
-        }
-        
-        const file = new File([blob], `mic_recording_${Date.now()}.${extension}`, { type: actualMimeType });
-        
-        // Spawn node with name "Recorded Sound"
-        onAddSound('uploaded', `Recorded Sound #${sounds.length + 1}`, file);
-
-        // Turn off stream tracks to stop mic indicator
-        stream.getTracks().forEach((track) => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecordingMic(true);
-      setMicSeconds(0);
-
-      micTimerRef.current = setInterval(() => {
-        setMicSeconds((prev) => prev + 1);
-      }, 1000);
-    } catch (err: any) {
-      console.error('Mic access failed:', err);
-      setMicError('Microphone access denied or unavailable.');
+  const handleRecordingComplete = (file: File) => {
+    if (onAddRecordedSound) {
+      onAddRecordedSound(file);
+    } else {
+      onAddSound('uploaded', 'Recorded Sound', file);
     }
   };
 
-  const stopMicRecording = () => {
-    if (micMediaRecorderRef.current && isRecordingMic) {
-      micMediaRecorderRef.current.stop();
-      setIsRecordingMic(false);
-      if (micTimerRef.current) {
-        clearInterval(micTimerRef.current);
-        micTimerRef.current = null;
-      }
-    }
-  };
+  const {
+    isRecordingMic,
+    micSeconds,
+    micError,
+    startMicRecording,
+    stopMicRecording
+  } = useMicRecorder({ onRecordingComplete: handleRecordingComplete });
 
   // Helper to compute distance
   const getDistance = (sound: SoundSource) => {
@@ -118,13 +61,23 @@ export default function SoundList({
   };
 
   // Handle local file upload
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     const file = files[0];
-    const name = file.name.split('.')[0] || 'Custom Sound';
-    
+    const validation = validateAudioUpload(file);
+    if (!validation.valid) {
+      if (onError && validation.error) {
+        onError(validation.error);
+      }
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    const name = extractSoundName(file.name);
     onAddSound('uploaded', name, file);
 
     // Reset input
@@ -169,7 +122,7 @@ export default function SoundList({
             <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
           </span>
         </div>
-        
+
         <div className="grid grid-cols-2 gap-2">
           {/* Upload Button */}
           <div className="relative">
@@ -177,7 +130,7 @@ export default function SoundList({
               ref={fileInputRef}
               id="audio-file-upload"
               type="file"
-              accept="audio/*,video/*,.wav,.WAV,.wave,.mp3,.m4a,.m4r,.aac,.caf,.aiff,.aif,.flac,.ogg,.webm,.mp4,audio/wav,audio/x-wav,audio/wave,audio/vnd.wave,audio/mpeg,audio/mp4,audio/aac,audio/x-m4a,audio/m4a,audio/caf,audio/aiff,*/*"
+              accept={AUDIO_INPUT_ACCEPT}
               onChange={handleFileUpload}
               className="hidden"
             />
@@ -258,8 +211,8 @@ export default function SoundList({
                 key={sound.id}
                 id={`sound-card-${sound.id}`}
                 className={`p-3 rounded-xl border transition-all duration-200 bg-white ${
-                  isNear 
-                    ? 'border-zinc-900 shadow-xs ring-1 ring-zinc-950/5' 
+                  isNear
+                    ? 'border-zinc-900 shadow-xs ring-1 ring-zinc-950/5'
                     : 'border-zinc-200 hover:border-zinc-400'
                 }`}
               >
@@ -277,7 +230,7 @@ export default function SoundList({
                       {sound.soundType}
                     </p>
                   </div>
-                  
+
                   {/* Action row */}
                   <div className="flex items-center gap-1 shrink-0">
                     {/* Teleport */}
@@ -359,7 +312,7 @@ export default function SoundList({
         <h3 className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider font-mono">
           Quick-Add Acoustic Synthesizers
         </h3>
-        
+
         {/* Presets Grid */}
         <div className="grid grid-cols-2 gap-1.5">
           <button
